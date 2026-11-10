@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOMS – Department Order Monitoring System</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2314b8a6'/%3E%3Cpath d='M8 22V10h5a6 6 0 010 12H8z' fill='none' stroke='%23062a27' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #080d17;
+  --surface: #0e1624;
+  --surface-2: #131d2f;
+  --line: #1f2c42;
+  --line-soft: #172236;
+  --text: #e7edf7;
+  --muted: #8b9ab3;
+  --faint: #5f6f8a;
+  --accent: #2dd4bf;
+  --accent-ink: #04201d;
+  --accent-soft: rgba(45, 212, 191, .12);
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --over: #f87171;
+  --over-soft: rgba(248, 113, 113, .12);
+  --warn-soft: rgba(251, 191, 36, .12);
+  --track: #1a2538;
+  --radius: 12px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- layout ---------- */
+.app { display: grid; height: 100dvh; grid-template-columns: 224px minmax(0, 1fr) 392px; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 18px 14px; gap: 6px; overflow-y: auto; }
+.main { overflow-y: auto; padding: 22px 28px 40px; min-width: 0; }
+.panel { background: var(--surface); border-left: 1px solid var(--line); overflow-y: auto; padding: 22px 20px 32px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ---------- sidebar ---------- */
+.brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px 18px; }
+.logo { width: 34px; height: 34px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; flex: none; }
+.brand b { display: block; font-size: 16px; letter-spacing: .06em; }
+.brand span { display: block; font-size: 11px; color: var(--muted); line-height: 1.25; }
+.nav-label { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint); padding: 4px 8px; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; color: var(--muted); text-decoration: none; }
+.nav a[aria-current="page"] { background: var(--surface-2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.nav svg { width: 17px; height: 17px; flex: none; }
+.jump { display: none; margin-left: auto; background: var(--accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; padding: 8px 14px; border-radius: 9px; }
+.side-foot { margin-top: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 12px; color: var(--muted); }
+.side-foot b { display: block; color: var(--text); font-size: 13px; margin-bottom: 2px; }
+
+/* ---------- main header ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.pager { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.pager button { width: 30px; height: 30px; border: 0; background: none; border-radius: 7px; cursor: pointer; display: grid; place-items: center; color: var(--muted); }
+.pager button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.pager button:disabled { opacity: .3; cursor: default; }
+.pager span { padding: 0 10px; font-weight: 600; font-size: 13px; min-width: 82px; text-align: center; }
+
+/* ---------- cards ---------- */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius); margin-bottom: 16px; background: var(--warn-soft); border: 1px solid rgba(251,191,36,.35); color: #fde8a6; }
+.banner.closed { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
+.banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+
+.cycle { padding: 16px 18px; margin-bottom: 14px; }
+.cycle-row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.cycle-title { font-weight: 650; font-size: 15px; }
+.cycle-meta { color: var(--muted); font-size: 13px; }
+.timebar { height: 6px; background: var(--track); border-radius: 99px; margin-top: 12px; overflow: hidden; }
+.timebar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+.kpi { padding: 14px 16px; }
+.kpi small { display: block; color: var(--muted); font-size: 12px; }
+.kpi strong { display: block; font-size: 22px; margin-top: 4px; letter-spacing: -.01em; }
+.kpi em { display: block; font-style: normal; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.kpi.bad strong { color: var(--over); }
+
+/* ---------- department groups ---------- */
+.dept { margin-bottom: 18px; overflow: hidden; }
+.dept-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 13px 18px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.dept-head h2 { margin: 0; font-size: 13px; letter-spacing: .09em; text-transform: uppercase; }
+.dept-head .tot { text-align: right; color: var(--muted); font-size: 13px; }
+.dept-head .tot b { color: var(--text); font-weight: 600; }
+.dept-head .bar { grid-column: 1 / -1; }
+
+.rows { list-style: none; margin: 0; padding: 0; }
+.row { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(110px, 1.4fr) 158px 116px; gap: 6px 16px; align-items: center; padding: 11px 18px; border-bottom: 1px solid var(--line-soft); cursor: pointer; width: 100%; background: none; border-left: 0; border-right: 0; border-top: 0; text-align: left; }
+.rows li:last-child .row { border-bottom: 0; }
+.row:hover { background: rgba(255,255,255,.025); }
+.row .name { font-weight: 500; overflow-wrap: anywhere; }
+.row .amt { text-align: right; font-size: 13px; white-space: nowrap; }
+.row .amt b { font-weight: 600; }
+.row .amt span { color: var(--muted); }
+.row .st { display: flex; justify-content: flex-end; }
+
+.bar { display: block; height: 8px; background: var(--track); border-radius: 99px; overflow: hidden; position: relative; }
+.bar i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--ok); transition: width .5s cubic-bezier(.2,.7,.2,1); }
+.bar.near i { background: var(--warn); }
+.bar.over i { background: var(--over); }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; background: rgba(52,211,153,.12); color: var(--ok); }
+.pill.near { background: var(--warn-soft); color: var(--warn); }
+.pill.over { background: var(--over-soft); color: var(--over); }
+.pill.idle { background: var(--surface-2); color: var(--muted); font-weight: 500; }
+.pill svg { width: 12px; height: 12px; }
+
+/* ---------- right panel ---------- */
+.panel-inner { display: contents; }
+.panel h3 { margin: 0; font-size: 15px; }
+.panel .hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.form { display: flex; flex-direction: column; gap: 14px; }
+label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.field { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; width: 100%; }
+.field:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.field[readonly] { color: var(--text); background: var(--surface-2); cursor: default; }
+.field::placeholder { color: var(--faint); }
+
+.combo { position: relative; }
+.combo .field { padding-right: 34px; }
+.combo .chev { position: absolute; right: 11px; top: 50%; width: 14px; height: 14px; margin-top: -7px; color: var(--muted); pointer-events: none; }
+.list { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 6px); max-height: 320px; overflow-y: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 14px 40px rgba(0,0,0,.5); padding: 4px; margin: 0; list-style: none; }
+.list .grp { padding: 8px 10px 4px; font-size: 11px; letter-spacing: .09em; color: var(--faint); text-transform: uppercase; }
+.list [role=option] { padding: 8px 10px; border-radius: 7px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+.list [role=option][aria-selected=true] { background: var(--accent-soft); }
+.list [role=option] small { color: var(--muted); white-space: nowrap; }
+.list .none { padding: 12px; color: var(--muted); }
+
+.catinfo { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 13px; }
+.catinfo .g { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.catinfo small { display: block; color: var(--muted); font-size: 11px; }
+.catinfo b { display: block; font-size: 13px; }
+.preview { margin-top: 9px; font-size: 12px; color: var(--muted); }
+.preview.over { color: var(--over); font-weight: 600; }
+.preview.near { color: var(--warn); }
+.preview.ok { color: var(--ok); }
+
+.btn { border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; padding: 12px 14px; cursor: pointer; width: 100%; }
+.btn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.warn { background: var(--over); color: #2a0707; }
+.msg { font-size: 13px; min-height: 18px; }
+.msg.err { color: var(--over); }
+
+.activity { list-style: none; margin: 12px 0 0; padding: 0; }
+.activity li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+.activity li:last-child { border-bottom: 0; }
+.activity .t { font-weight: 550; overflow-wrap: anywhere; }
+.activity .v { text-align: right; font-weight: 650; }
+.activity .m { grid-column: 1 / -1; color: var(--muted); font-size: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.empty { color: var(--muted); padding: 18px 0 4px; font-size: 13px; }
+
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 50; background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid var(--ok); padding: 11px 16px; border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,.55); max-width: min(92vw, 460px); }
+.toast.over { border-left-color: var(--over); }
+.skeleton { color: var(--muted); padding: 40px 0; text-align: center; }
+.retry { margin-top: 10px; border: 1px solid var(--line); background: var(--surface-2); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 200px minmax(0, 1fr); height: auto; min-height: 100dvh; }
+  .sidebar { grid-row: 1 / span 2; position: sticky; top: 0; height: 100dvh; }
+  .main { overflow: visible; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; grid-column: 2; }
+  .panel-inner { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+}
+@media (max-width: 820px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { grid-row: auto; position: static; height: auto; flex-direction: row; align-items: center; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand { padding: 0; }
+  .brand span, .nav-label, .nav, .side-foot { display: none; }
+  .jump { display: block; }
+  html { scroll-behavior: smooth; }
+  .main { padding: 18px 16px 8px; }
+  .panel { grid-column: 1; padding: 20px 16px 32px; }
+  .panel-inner { grid-template-columns: 1fr; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .row .bar { grid-column: 1 / -1; order: 3; }
+  .row .amt { grid-column: 1 / 2; text-align: left; order: 2; }
+  .row .st { order: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 32 32"><path d="M8 22V10h5a6 6 0 010 12H8z" fill="none" stroke="#062a27" stroke-width="3.4" stroke-linejoin="round"/></svg>
+      </div>
+      <div><b>DOMS</b><span>Department Order<br>Monitoring System</span></div>
+    </div>
+    <div class="nav-label">Menu</div>
+    <nav class="nav" aria-label="Main">
+      <a href="#" aria-current="page">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="8" rx="1.5"/><rect x="11" y="3" width="6" height="5" rx="1.5"/><rect x="11" y="10" width="6" height="7" rx="1.5"/><rect x="3" y="13" width="6" height="4" rx="1.5"/></svg>
+        Dashboard
+      </a>
+    </nav>
+    <a class="jump" href="#entry">+ New entry</a>
+    <div class="side-foot" id="sideFoot"><b>Cycle –</b>Loading…</div>
+  </aside>
+
+  <main class="main" id="main" aria-live="polite">
+    <div class="skeleton">Loading dashboard…</div>
+  </main>
+
+  <aside class="panel" aria-label="New entry and recent activity">
+    <div class="panel-inner">
+      <section id="entry">
+        <h3>New Entry</h3>
+        <div class="hint" id="entryHint">Record stock value received</div>
+        <form class="form" id="form" novalidate style="margin-top:14px">
+          <div>
+            <label for="catInput">Category</label>
+            <div class="combo" id="combo">
+              <input class="field" id="catInput" type="text" role="combobox" aria-expanded="false" aria-controls="catList" aria-autocomplete="list" autocomplete="off" placeholder="Search or select a category">
+              <svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+              <ul class="list" id="catList" role="listbox" hidden></ul>
+            </div>
+          </div>
+          <div>
+            <label for="dept">Department <span style="font-weight:400">(automatic)</span></label>
+            <input class="field" id="dept" type="text" readonly tabindex="-1" placeholder="Shown after you pick a category">
+          </div>
+          <div class="catinfo" id="catinfo" hidden></div>
+          <div>
+            <label for="value">Value</label>
+            <input class="field num" id="value" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00">
+          </div>
+          <div>
+            <label for="by">Submitted By</label>
+            <input class="field" id="by" type="text" maxlength="60" autocomplete="name" placeholder="Your name">
+          </div>
+          <div class="msg" id="msg" role="alert"></div>
+          <button class="btn" id="submit" type="submit">Submit entry</button>
+        </form>
+      </section>
+
+      <section>
+        <h3>Recent Activity</h3>
+        <div class="hint">Latest 15 entries across all categories</div>
+        <ul class="activity" id="activity"></ul>
+      </section>
+    </div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const TZ = 'Asia/Kuala_Lumpur';
+  const nf0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  const nf2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = (n) => (Number.isInteger(n) ? nf0.format(n) : nf2.format(n));
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const dmy = (iso) => iso.split('-').reverse().join('/');
+  const tsFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const when = (ms) => { const p = Object.fromEntries(tsFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value])); return `${p.day}/${p.month} ${p.hour}:${p.minute}`; };
+
+  const state = { data: null, view: null, selected: null, active: -1, filtered: [] };
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+  };
+
+  const icons = {
+    warn: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6.5 11.5h-13L8 2z"/><path d="M8 6.5v3M8 11.6v.1"/></svg>',
+    info: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v4.5M10 6.5v.1"/></svg>',
+    prev: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>',
+    next: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>',
+  };
+
+  const statusOf = (received, limit) => {
+    if (received > limit) return 'over';
+    if (limit > 0 && received / limit >= 0.8) return 'near';
+    return 'ok';
+  };
+  const pctOf = (received, limit) => (limit > 0 ? (received / limit) * 100 : 0);
+  const pctText = (p) => (p >= 100 ? Math.round(p) : p >= 10 ? p.toFixed(0) : p.toFixed(1)) + '%';
+  const barHtml = (received, limit) => {
+    const st = statusOf(received, limit);
+    const w = Math.min(100, pctOf(received, limit));
+    return `<span class="bar ${st === 'ok' ? '' : st}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Math.min(100, pctOf(received, limit)))}"><i style="width:${w}%"></i></span>`;
+  };
+  const pillHtml = (received, limit) => {
+    const st = statusOf(received, limit);
+    const p = pctOf(received, limit);
+    if (received <= 0) return '<span class="pill idle">No entries</span>';
+    if (st === 'over') return `<span class="pill over">${icons.warn}Over ${pctText(p)}</span>`;
+    if (st === 'near') return `<span class="pill near">${pctText(p)} · near</span>`;
+    return `<span class="pill">${pctText(p)}</span>`;
+  };
+
+  /* ---------------- data ---------------- */
+  async function load(cycle) {
+    try {
+      const r = await fetch('/api/dashboard' + (cycle ? `?cycle=${cycle}` : ''), { cache: 'no-store' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Request failed');
+      state.data = await r.json();
+      state.view = state.data.cycle.n;
+      render();
+    } catch (e) {
+      $('main').innerHTML = `<div class="skeleton">Couldn’t load the dashboard.<br><small>${esc(e.message)}</small><br><button class="retry" id="retry">Try again</button></div>`;
+      $('retry').onclick = () => load(cycle);
+    }
+  }
+
+  /* ---------------- render dashboard ---------------- */
+  function render() {
+    const d = state.data;
+    const cats = d.categories;
+    const cy = d.cycle;
+    const totLimit = cats.reduce((a, c) => a + c.limit, 0);
+    const totRecv = cats.reduce((a, c) => a + c.received, 0);
+    const over = cats.filter((c) => c.received > c.limit);
+    const near = cats.filter((c) => statusOf(c.received, c.limit) === 'near');
+    const remaining = totLimit - totRecv;
+    const timePct = cy.status === 'closed' ? 100 : cy.status === 'active' ? (cy.dayNumber / cy.days) * 100 : 0;
+
+    let banner = '';
+    if (!d.started) banner = `<div class="banner">${icons.info}<div><b>Tracking starts on ${dmy(d.trackingStart)}</b> — in ${d.daysUntilStart} day${d.daysUntilStart === 1 ? '' : 's'}. You’re previewing Cycle 1; new entries open on that date.</div></div>`;
+    else if (cy.status === 'closed') banner = `<div class="banner closed">${icons.info}<div>You’re viewing a closed cycle (read-only). The live cycle is Cycle ${d.currentCycle}.</div></div>`;
+
+    const cycleMeta = cy.status === 'active' ? `Day ${cy.dayNumber} of ${cy.days} · ${cy.daysLeft} day${cy.daysLeft === 1 ? '' : 's'} left`
+      : cy.status === 'closed' ? 'Closed' : `Not started · ${cy.days} days`;
+
+    const groups = [];
+    for (const c of cats) {
+      let g = groups.find((x) => x.name === c.department);
+      if (!g) groups.push((g = { name: c.department, items: [] }));
+      g.items.push(c);
+    }
+
+    const deptHtml = groups.map((g) => {
+      const l = g.items.reduce((a, c) => a + c.limit, 0);
+      const r = g.items.reduce((a, c) => a + c.received, 0);
+      return `<section class="card dept" aria-label="${esc(g.name)}">
+        <div class="dept-head">
+          <h2>${esc(g.name)}</h2>
+          <div class="tot num"><b>${money(r)}</b> / ${money(l)} · ${pctText(pctOf(r, l))}</div>
+          ${barHtml(r, l)}
+        </div>
+        <ul class="rows">${g.items.map((c) => `
+          <li><button type="button" class="row" data-id="${c.id}" title="Add an entry for ${esc(c.name)}">
+            <span class="name">${esc(c.name)}</span>
+            ${barHtml(c.received, c.limit)}
+            <span class="amt num"><b>${money(c.received)}</b> <span>/ ${money(c.limit)}</span></span>
+            <span class="st">${pillHtml(c.received, c.limit)}</span>
+          </button></li>`).join('')}
+        </ul>
+      </section>`;
+    }).join('');
+
+    $('main').innerHTML = `
+      <div class="top">
+        <div><h1>Dashboard</h1><div class="sub">Limit vs stock value received, per category</div></div>
+        <div class="pager" role="group" aria-label="Cycle navigation">
+          <button type="button" id="prev" aria-label="Previous cycle" ${state.view <= 1 ? 'disabled' : ''}>${icons.prev}</button>
+          <span>Cycle ${state.view}</span>
+          <button type="button" id="next" aria-label="Next cycle" ${state.view >= Math.max(d.currentCycle, 1) ? 'disabled' : ''}>${icons.next}</button>
+        </div>
+      </div>
+      ${banner}
+      <div class="card cycle">
+        <div class="cycle-row">
+          <div class="cycle-title">Cycle ${cy.n} · <span class="num">${dmy(cy.start)} – ${dmy(cy.end)}</span></div>
+          <div class="cycle-meta">${cycleMeta}</div>
+        </div>
+        <div class="timebar" aria-hidden="true"><i style="width:${timePct}%"></i></div>
+      </div>
+      <div class="kpis">
+        <div class="card kpi"><small>Total limit</small><strong class="num">${money(totLimit)}</strong><em>${cats.length} categories</em></div>
+        <div class="card kpi"><small>Stock value received</small><strong class="num">${money(totRecv)}</strong><em>${pctText(pctOf(totRecv, totLimit))} of total limit</em></div>
+        <div class="card kpi ${remaining < 0 ? 'bad' : ''}"><small>${remaining < 0 ? 'Over total limit' : 'Remaining'}</small><strong class="num">${money(Math.abs(remaining))}</strong><em>${cy.status === 'active' ? `${pctText(timePct)} of cycle elapsed` : '&nbsp;'}</em></div>
+        <div class="card kpi ${over.length ? 'bad' : ''}"><small>Alerts</small><strong class="num">${over.length} over</strong><em>${near.length} near limit (80%+)</em></div>
+      </div>
+      ${deptHtml}`;
+
+    $('prev').onclick = () => load(state.view - 1);
+    $('next').onclick = () => load(state.view + 1);
+    $('main').querySelectorAll('.row').forEach((b) => b.addEventListener('click', () => {
+      const c = state.data.categories.find((x) => x.id === Number(b.dataset.id));
+      if (c) { selectCategory(c); $('value').focus(); }
+    }));
+
+    $('sideFoot').innerHTML = d.started
+      ? `<b>Cycle ${d.currentCycle}</b>${dmy(describe(d).start)} – ${dmy(describe(d).end)}`
+      : `<b>Not started</b>Begins ${dmy(d.trackingStart)}`;
+
+    renderActivity();
+    renderEntryContext();
+    if (state.selected) { const fresh = state.data.categories.find((c) => c.id === state.selected.id); if (fresh) state.selected = fresh; renderCatInfo(); }
+  }
+  // Date range of the live cycle (for sidebar) — derived from the viewed cycle's bounds.
+  function describe(d) {
+    const cy = d.cycle; const shift = (d.currentCycle || 1) - cy.n;
+    if (!shift) return cy;
+    const add = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+    return { start: add(cy.start, shift * cy.days), end: add(cy.end, shift * cy.days) };
+  }
+
+  function renderActivity() {
+    const rows = state.data.recent;
+    $('activity').innerHTML = rows.length ? rows.map((r) => `
+      <li>
+        <span class="t">${esc(r.category)}</span>
+        <span class="v num">${money(r.value)}</span>
+        <span class="m"><span>${esc(r.department)}</span><span>·</span><span>${esc(r.submittedBy)}</span><span>·</span><span class="num">${when(r.ts)}</span>
+          ${r.overLimit ? `<span class="pill over">${icons.warn}Over limit</span>` : ''}</span>
+      </li>`).join('') : '<li class="empty" style="display:block">No entries yet. Submit the first one above.</li>';
+  }
+
+  function renderEntryContext() {
+    const d = state.data;
+    const btn = $('submit');
+    if (!d.started) {
+      $('entryHint').textContent = `Opens ${dmy(d.trackingStart)}`;
+      btn.disabled = true;
+      btn.textContent = `Entries open on ${dmy(d.trackingStart)}`;
+    } else {
+      $('entryHint').textContent = `Recording into Cycle ${d.currentCycle}`;
+      btn.disabled = false;
+      updatePreview();
+    }
+  }
+
+  /* ---------------- category picker ---------------- */
+  const input = $('catInput'), list = $('catList');
+
+  function openList(filter) {
+    const q = (filter || '').trim().toLowerCase();
+    state.filtered = state.data.categories.filter((c) => !q || c.name.toLowerCase().includes(q) || c.department.toLowerCase().includes(q));
+    state.active = Math.max(0, state.filtered.findIndex((c) => state.selected && c.id === state.selected.id));
+    if (!state.filtered.length) { list.innerHTML = '<li class="none">No matching category</li>'; }
+    else {
+      let html = '', last = '';
+      state.filtered.forEach((c, i) => {
+        if (c.department !== last) { html += `<li class="grp" role="presentation">${esc(c.department)}</li>`; last = c.department; }
+        html += `<li role="option" id="opt${i}" data-i="${i}" aria-selected="${i === state.active}"><span>${esc(c.name)}</span><small class="num">${money(c.limit)}</small></li>`;
+      });
+      list.innerHTML = html;
+    }
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    scrollActive();
+  }
+  function closeList() { list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
+  function scrollActive() {
+    list.querySelectorAll('[role=option]').forEach((el) => el.setAttribute('aria-selected', String(Number(el.dataset.i) === state.active)));
+    const el = $('opt' + state.active);
+    if (el) { input.setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); }
+  }
+  function selectCategory(c) {
+    state.selected = c;
+    input.value = c.name;
+    $('dept').value = c.department;
+    closeList();
+    renderCatInfo();
+    $('msg').textContent = '';
+  }
+  function clearSelection() {
+    state.selected = null;
+    $('dept').value = '';
+    $('catinfo').hidden = true;
+    updatePreview();
+  }
+
+  input.addEventListener('focus', () => { if (state.data) { input.select(); openList(''); } });
+  input.addEventListener('input', () => { if (state.selected && input.value !== state.selected.name) clearSelection(); openList(input.value); });
+  input.addEventListener('blur', () => setTimeout(() => { closeList(); if (state.selected) input.value = state.selected.name; }, 120));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (list.hidden) return openList(input.value);
+      const n = state.filtered.length; if (!n) return;
+      state.active = (state.active + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; scrollActive();
+    } else if (e.key === 'Enter' && !list.hidden) {
+      e.preventDefault();
+      const c = state.filtered[state.active]; if (c) selectCategory(c);
+    } else if (e.key === 'Escape') { closeList(); }
+  });
+  list.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const li = e.target.closest('[role=option]');
+    if (li) selectCategory(state.filtered[Number(li.dataset.i)]);
+  });
+
+  /* ---------------- selected-category info + live preview ---------------- */
+  const parseValue = () => {
+    const s = $('value').value.replace(/[,\s]/g, '');
+    if (s === '' || !/^\d*\.?\d*$/.test(s)) return NaN;
+    return Number(s);
+  };
+  function renderCatInfo() {
+    const c = state.selected; if (!c) return;
+    const recv = c.receivedCurrent;
+    const info = $('catinfo');
+    info.hidden = false;
+    info.innerHTML = `
+      <div class="g">
+        <div><small>Limit</small><b class="num">${money(c.limit)}</b></div>
+        <div><small>Received</small><b class="num">${money(recv)}</b></div>
+        <div><small>Remaining</small><b class="num">${recv > c.limit ? '–' + money(recv - c.limit) : money(c.limit - recv)}</b></div>
+      </div>
+      <div id="infoBar">${barHtml(recv, c.limit)}</div>
+      <div class="preview" id="preview"></div>`;
+    updatePreview();
+  }
+  function updatePreview() {
+    const c = state.selected, btn = $('submit');
+    if (state.data && !state.data.started) return;
+    const v = parseValue();
+    btn.classList.remove('warn');
+    btn.textContent = 'Submit entry';
+    const pv = $('preview'); if (!pv || !c) return;
+    pv.className = 'preview';
+    if (!(v > 0)) { pv.textContent = `Enter a value to see the effect on this category’s limit.`; return; }
+    const after = c.receivedCurrent + v;
+    $('infoBar').innerHTML = barHtml(after, c.limit);
+    const p = pctOf(after, c.limit);
+    if (after > c.limit) {
+      pv.className = 'preview over';
+      pv.textContent = `This entry exceeds the limit by ${money(after - c.limit)} (${pctText(p)} of limit).`;
+      btn.classList.add('warn'); btn.textContent = 'Submit (exceeds limit)';
+    } else {
+      pv.className = 'preview ' + (statusOf(after, c.limit) === 'near' ? 'near' : 'ok');
+      pv.textContent = `After this entry: ${pctText(p)} of limit used, ${money(c.limit - after)} remaining.`;
+    }
+  }
+  $('value').addEventListener('input', updatePreview);
+
+  /* ---------------- submit ---------------- */
+  let toastTimer;
+  function toast(text, over) {
+    const t = $('toast'); t.textContent = text; t.className = 'toast' + (over ? ' over' : ''); t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+  $('by').value = store.get('doms.by') || '';
+
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = $('msg'); msg.className = 'msg'; msg.textContent = '';
+    const v = parseValue(), by = $('by').value.trim();
+    const fail = (t, el) => { msg.className = 'msg err'; msg.textContent = t; if (el) el.focus(); };
+    if (!state.selected) return fail('Please select a category.', input);
+    if (!(v > 0)) return fail('Enter a value greater than 0.', $('value'));
+    if (!by) return fail('Please enter Submitted By.', $('by'));
+
+    const btn = $('submit'); btn.disabled = true; const label = btn.textContent; btn.textContent = 'Submitting…';
+    try {
+      const r = await fetch('/api/entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryId: state.selected.id, value: v, submittedBy: by }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Could not save the entry.');
+      store.set('doms.by', by);
+      toast(j.overLimit ? `Saved. ${j.category} is now over its limit (${money(j.received)} / ${money(j.limit)}).` : `Saved ${money(v)} for ${j.category} (${money(j.received)} / ${money(j.limit)}).`, j.overLimit);
+      state.selected = null; input.value = ''; $('dept').value = ''; $('value').value = ''; $('catinfo').hidden = true;
+      await load(); // jump back to the live cycle
+    } catch (err) {
+      fail(err.message);
+      btn.textContent = label;
+    } finally {
+      btn.disabled = state.data ? !state.data.started : false;
+      if (state.data && state.data.started) updatePreview();
+    }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
