@@ -24,6 +24,15 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 - The dashboard auto-refreshes every 30 seconds so everyone sees each other's entries.
 - `npm test` covers 25 simultaneous users and a double-click sent 6 times at once.
 
+## Admin tab (edit / delete entries)
+
+- Sidebar -> **Admin**, password **8888** (checked on the server for every request, not just in the browser).
+- To change it without editing code: in Vercel add the environment variable `ADMIN_PASSWORD` and redeploy.
+- Flow: pick the **Period (cycle)** -> filter by **Department** -> optionally a **Category** -> **Edit** (category, value, submitted by) or **Delete** a row -> press **Save changes**.
+- Edits and deletions are staged first (rows are highlighted, **Undo** is available) and only written when you press Save. All changes are saved together, all-or-nothing.
+- Edited entries show an "Edited" tag. The admin session locks after 15 minutes of inactivity, or with the Lock button.
+- Dashboard totals follow immediately, because they are always calculated from the entries.
+
 ## Deploy (once)
 
 1. **Neon** – create a project. Choose region **AWS Asia Pacific (Singapore)** (matches `vercel.json` region `sin1`).

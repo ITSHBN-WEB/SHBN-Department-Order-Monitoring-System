@@ -158,5 +158,57 @@ assert.equal(r.body.categories.find((c) => c.name === 'RICE').receivedCurrent, 5
 r = await call(dashboard, { query: { cycle: '99' } });
 assert.equal(r.body.cycle.n, 2);
 
+// --- Admin API ----------------------------------------------------------------------------
+const { default: admin } = await import('../api/admin.js');
+const adm = (body) => call(admin, { method: 'POST', body: { password: '8888', ...body } });
+assert.equal((await call(admin, { method: 'POST', body: { action: 'list', cycle: 2 } })).code, 401);          // no password
+assert.equal((await call(admin, { method: 'POST', body: { password: '1234', action: 'login' } })).code, 401); // wrong password
+assert.equal((await call(admin, { method: 'GET' })).code, 405);
+assert.equal((await adm({ action: 'login' })).code, 200);
+
+r = await adm({ action: 'meta' });
+assert.deepEqual(r.body.cycles.map((c) => c.n), [0, 1, 2]);
+assert.equal(r.body.defaultCycle, 2);
+assert.equal(r.body.categories.length, 31);
+assert.ok(r.body.cycles.find((c) => c.n === 1).count > 0);
+
+const baby = await catId('BABY CARE'), pet = await catId('PET FOOD'), tob = await catId('TOBACCO / MAGAZINE & NEWSPAPER');
+for (const [c, v, who] of [[baby, 100, 'a'], [baby, 200, 'b'], [pet, 300, 'c'], [tob, 400, 'd']]) {
+  assert.equal((await call(entries, { method: 'POST', body: { categoryId: c, value: v, submittedBy: who } })).code, 201);
+}
+r = await adm({ action: 'list', cycle: 2 });
+assert.equal(r.body.entries.length, 5);                                  // Zul's 500 + the four above
+r = await adm({ action: 'list', cycle: 2, department: 'NONFOOD' });
+assert.equal(r.body.entries.length, 4);
+r = await adm({ action: 'list', cycle: 2, department: 'NONFOOD', categoryId: baby });
+assert.deepEqual(r.body.entries.map((e) => e.value).sort(), [100, 200]);
+assert.equal(r.body.entries[0].department, 'NONFOOD');
+const [e1, e2] = r.body.entries;
+
+// edit one (value + category + name), delete another, in a single save
+r = await adm({ action: 'save', updates: [{ id: e1.id, categoryId: pet, value: '250.456', submittedBy: ' new  name ' }], deletes: [e2.id] });
+assert.deepEqual([r.code, r.body.updated, r.body.deleted, r.body.missing], [200, 1, 1, 0]);
+r = await adm({ action: 'list', cycle: 2, categoryId: pet });
+const edited = r.body.entries.find((e) => e.id === e1.id);
+assert.deepEqual([edited.value, edited.submittedBy, edited.category, edited.department], [250.46, 'NEW NAME', 'PET FOOD', 'NONFOOD']);
+assert.ok(edited.editedAt > 0);
+assert.equal((await adm({ action: 'list', cycle: 2, categoryId: baby })).body.entries.length, 0);
+r = await call(dashboard);                                              // dashboard totals follow the edit
+assert.equal(r.body.categories.find((c) => c.name === 'PET FOOD').received, 300 + 250.46);
+// deleting an already-deleted entry is reported, not an error
+r = await adm({ action: 'save', deletes: [e2.id] });
+assert.deepEqual([r.code, r.body.deleted, r.body.missing], [200, 0, 1]);
+// validation: nothing is changed when any item is invalid
+const bads = [
+  { updates: [{ id: e1.id, categoryId: pet, value: 0, submittedBy: 'x' }] },
+  { updates: [{ id: e1.id, categoryId: pet, value: 5, submittedBy: '  ' }] },
+  { updates: [{ id: e1.id, categoryId: 99999, value: 5, submittedBy: 'x' }] },
+  { updates: [{ id: e1.id, categoryId: pet, value: 5, submittedBy: 'x' }], deletes: [e1.id] },
+  {},
+];
+for (const b of bads) assert.equal((await adm({ action: 'save', ...b })).code, 400, JSON.stringify(b));
+r = await adm({ action: 'list', cycle: 2, categoryId: pet });
+assert.equal(r.body.entries.find((e) => e.id === e1.id).value, 250.46);
+
 console.log('All DOMS tests passed');
 process.exit(0);

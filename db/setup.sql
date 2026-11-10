@@ -29,6 +29,7 @@ create table if not exists entries (
 -- Safeguard for simultaneous / repeated submits: each submission carries a unique request id,
 -- so a double-click or network retry can only ever be saved once.
 alter table entries add column if not exists request_id uuid;
+alter table entries add column if not exists edited_at timestamptz;   -- set when an admin edits an entry
 create unique index if not exists entries_request_id_uq on entries (request_id);
 
 create index if not exists entries_cycle_cat_idx on entries (cycle_no, category_id);

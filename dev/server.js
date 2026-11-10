@@ -38,7 +38,8 @@ if (process.env.DEMO) {
 
 const { default: dashboard } = await import('../api/dashboard.js');
 const { default: entries } = await import('../api/entries.js');
-const routes = { '/api/dashboard': dashboard, '/api/entries': entries };
+const { default: admin } = await import('../api/admin.js');
+const routes = { '/api/dashboard': dashboard, '/api/entries': entries, '/api/admin': admin };
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 http.createServer(async (req, res) => {
