@@ -22,17 +22,24 @@ create table if not exists entries (
   value        numeric(14,2) not null check (value > 0),
   submitted_by text not null,
   entry_date   date not null,          -- calendar date in Asia/Kuala_Lumpur
-  cycle_no     int  not null,          -- 45-day tracking cycle this entry belongs to
+  cycle_no     int  not null,          -- 0 = Test Cycle, 1+ = live 45-day cycles
   created_at   timestamptz not null default now()
 );
+
+-- Safeguard for simultaneous / repeated submits: each submission carries a unique request id,
+-- so a double-click or network retry can only ever be saved once.
+alter table entries add column if not exists request_id uuid;
+create unique index if not exists entries_request_id_uq on entries (request_id);
 
 create index if not exists entries_cycle_cat_idx on entries (cycle_no, category_id);
 create index if not exists entries_created_idx   on entries (created_at desc);
 
 -- Tracking settings (only inserted if missing, so re-running never resets them)
 insert into settings (key, value) values
-  ('tracking_start', '2026-11-15'),
-  ('cycle_days',     '45')
+  ('tracking_start', '2026-11-15'),   -- live cycle 1 starts here
+  ('cycle_days',     '45'),
+  ('test_start',     '2026-09-30'),   -- Test Cycle (practice data, stored as cycle 0)
+  ('test_end',       '2026-11-14')
 on conflict (key) do nothing;
 
 -- Department / category / limit value (from Department_Value.xlsx)

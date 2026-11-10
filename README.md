@@ -6,6 +6,22 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 - Tracking starts **15/11/2026**; cycle 1 = 15/11/2026 – 29/12/2026, cycle 2 starts 30/12/2026, and so on (automatic).
 - Cycle length and start date live in the `settings` table (see "Changing settings").
 
+## Test Cycle (30/09/2026 – 14/11/2026)
+
+- Until live tracking starts, the app runs in a **Test Cycle**: entries are saved as practice data (cycle 0), tagged "Test" in Recent Activity, and **never counted in the live cycles**.
+- On 15/11/2026 the app switches to live Cycle 1 on its own, starting from zero. Test data stays viewable via the cycle arrows (Test Cycle <-> Cycle 1).
+- Clear the practice data any time (Neon SQL Editor): `delete from entries where cycle_no = 0;`
+- Change the window: `update settings set value = '2026-09-30' where key = 'test_start';` (and `test_end`). To turn it off: `delete from settings where key in ('test_start','test_end');`
+- Note: 30/09 – 14/11 is 46 days (inclusive), one more than a normal cycle.
+
+## Multiple users submitting at once
+
+- Entries are append-only inserts and totals are always summed from them, so simultaneous submits can't overwrite each other or lose a value.
+- Each submission has a unique request id (unique index in the DB): a double-click or network retry is saved only once.
+- The "over limit" result is the category total as of *that* entry, matching Recent Activity.
+- The dashboard auto-refreshes every 30 seconds so everyone sees each other's entries.
+- `npm test` covers 25 simultaneous users and a double-click sent 6 times at once.
+
 ## Deploy (once)
 
 1. **Neon** – create a project. Choose region **AWS Asia Pacific (Singapore)** (matches `vercel.json` region `sin1`).
@@ -31,7 +47,7 @@ update settings set value = '2026-11-15' where key = 'tracking_start';
 update settings set value = '45'         where key = 'cycle_days';
 update categories set limit_value = 300000 where name = 'BEVERAGES';
 ```
-Re-running `db/setup.sql` is safe: it refreshes limits from the Excel list and never deletes entries.
+Re-running `db/setup.sql` is safe (and is required once if you ran an older version: it adds the request-id column and test settings): it refreshes limits from the Excel list and never deletes entries.
 
 ## Layout
 

@@ -12,10 +12,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sql = await createLocalDb();
 
 if (process.env.DEMO) {
-  // Pretend tracking started 12 days ago and add some activity.
-  const start = new Date(Date.now() - 12 * 86400000).toISOString().slice(0, 10);
-  await sql`update settings set value = ${start} where key = 'tracking_start'`;
+  // DEMO=1    -> sample entries inside the Test Cycle (default settings, today must be 30/09-14/11/2026)
+  // DEMO=live -> pretend live tracking started 12 days ago and add sample entries to cycle 1
+  const live = process.env.DEMO === 'live';
+  if (live) {
+    const start = new Date(Date.now() - 12 * 86400000).toISOString().slice(0, 10);
+    await sql`update settings set value = ${start} where key = 'tracking_start'`;
+  }
   const today = todayKL();
+  const cycleNo = live ? 1 : 0;
   const demo = [
     ['BEVERAGES', 120000, 'Aminah'], ['BEVERAGES', 95000, 'Farid'],
     ['CONFECTIONERY', 61000, 'Aminah'], ['RICE', 181500, 'Kirikko'],
@@ -26,9 +31,9 @@ if (process.env.DEMO) {
   ];
   for (const [name, value, by] of demo) {
     await sql`insert into entries (category_id, value, submitted_by, entry_date, cycle_no, created_at)
-      select id, ${value}, ${by}, ${today}, 1, now() - (random() * interval '10 days') from categories where name = ${name}`;
+      select id, ${value}, ${by}, ${today}, ${cycleNo}, now() - (random() * interval '10 days') from categories where name = ${name}`;
   }
-  console.log('DEMO data loaded (tracking started', start + ')');
+  console.log('DEMO data loaded into', live ? 'live cycle 1' : 'the Test Cycle');
 }
 
 const { default: dashboard } = await import('../api/dashboard.js');

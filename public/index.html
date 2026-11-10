@@ -68,6 +68,7 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
 /* ---------- cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius); margin-bottom: 16px; background: var(--warn-soft); border: 1px solid rgba(251,191,36,.35); color: #fde8a6; }
+.banner.test { background: var(--accent-soft); border-color: rgba(45,212,191,.38); color: #b8f3ea; }
 .banner.closed { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
 .banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
 
@@ -266,6 +267,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
   const nf2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const money = (n) => (Number.isInteger(n) ? nf0.format(n) : nf2.format(n));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const cycleName = (n) => (n === 0 ? 'Test Cycle' : 'Cycle ' + n);
   const dmy = (iso) => iso.split('-').reverse().join('/');
   const tsFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
   const when = (ms) => { const p = Object.fromEntries(tsFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value])); return `${p.day}/${p.month} ${p.hour}:${p.minute}`; };
@@ -307,7 +309,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
   /* ---------------- data ---------------- */
   async function load(cycle) {
     try {
-      const r = await fetch('/api/dashboard' + (cycle ? `?cycle=${cycle}` : ''), { cache: 'no-store' });
+      const r = await fetch('/api/dashboard' + (cycle != null ? `?cycle=${cycle}` : ''), { cache: 'no-store' });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Request failed');
       state.data = await r.json();
       state.view = state.data.cycle.n;
@@ -328,11 +330,16 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
     const over = cats.filter((c) => c.received > c.limit);
     const near = cats.filter((c) => statusOf(c.received, c.limit) === 'near');
     const remaining = totLimit - totRecv;
+    const maxLive = Math.max(d.phase === 'live' ? d.currentCycle : 0, 1);
+    const prevView = state.view > 1 ? state.view - 1 : state.view === 1 && d.testPeriod ? 0 : null;
+    const nextView = state.view === 0 ? 1 : state.view < maxLive ? state.view + 1 : null;
     const timePct = cy.status === 'closed' ? 100 : cy.status === 'active' ? (cy.dayNumber / cy.days) * 100 : 0;
 
     let banner = '';
-    if (!d.started) banner = `<div class="banner">${icons.info}<div><b>Tracking starts on ${dmy(d.trackingStart)}</b> — in ${d.daysUntilStart} day${d.daysUntilStart === 1 ? '' : 's'}. You’re previewing Cycle 1; new entries open on that date.</div></div>`;
-    else if (cy.status === 'closed') banner = `<div class="banner closed">${icons.info}<div>You’re viewing a closed cycle (read-only). The live cycle is Cycle ${d.currentCycle}.</div></div>`;
+    const live = d.testPeriod ? `Live tracking (Cycle 1) starts ${dmy(d.trackingStart)}.` : '';
+    if (d.phase === 'test') banner = `<div class="banner test">${icons.info}<div><b>Test period: ${dmy(d.testPeriod.start)} – ${dmy(d.testPeriod.end)}.</b> Entries made now are practice data, kept separate from the live cycles and not counted in them. ${live}</div></div>`;
+    else if (d.phase === 'upcoming') banner = `<div class="banner">${icons.info}<div><b>Entries open on ${dmy(d.opensOn)}</b> — in ${d.daysUntilStart} day${d.daysUntilStart === 1 ? '' : 's'}. You’re previewing ${cycleName(state.view)}.</div></div>`;
+    else if (cy.status === 'closed') banner = `<div class="banner closed">${icons.info}<div>You’re viewing ${cy.test ? 'the closed Test Cycle (practice data only)' : 'a closed cycle'} — read-only. The live cycle is Cycle ${d.currentCycle}.</div></div>`;
 
     const cycleMeta = cy.status === 'active' ? `Day ${cy.dayNumber} of ${cy.days} · ${cy.daysLeft} day${cy.daysLeft === 1 ? '' : 's'} left`
       : cy.status === 'closed' ? 'Closed' : `Not started · ${cy.days} days`;
@@ -368,15 +375,15 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
       <div class="top">
         <div><h1>Dashboard</h1><div class="sub">Limit vs stock value received, per category</div></div>
         <div class="pager" role="group" aria-label="Cycle navigation">
-          <button type="button" id="prev" aria-label="Previous cycle" ${state.view <= 1 ? 'disabled' : ''}>${icons.prev}</button>
-          <span>Cycle ${state.view}</span>
-          <button type="button" id="next" aria-label="Next cycle" ${state.view >= Math.max(d.currentCycle, 1) ? 'disabled' : ''}>${icons.next}</button>
+          <button type="button" id="prev" aria-label="Previous cycle" ${prevView === null ? 'disabled' : ''}>${icons.prev}</button>
+          <span>${cycleName(state.view)}</span>
+          <button type="button" id="next" aria-label="Next cycle" ${nextView === null ? 'disabled' : ''}>${icons.next}</button>
         </div>
       </div>
       ${banner}
       <div class="card cycle">
         <div class="cycle-row">
-          <div class="cycle-title">Cycle ${cy.n} · <span class="num">${dmy(cy.start)} – ${dmy(cy.end)}</span></div>
+          <div class="cycle-title">${cycleName(cy.n)} · <span class="num">${dmy(cy.start)} – ${dmy(cy.end)}</span></div>
           <div class="cycle-meta">${cycleMeta}</div>
         </div>
         <div class="timebar" aria-hidden="true"><i style="width:${timePct}%"></i></div>
@@ -389,29 +396,21 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
       </div>
       ${deptHtml}`;
 
-    $('prev').onclick = () => load(state.view - 1);
-    $('next').onclick = () => load(state.view + 1);
+    $('prev').onclick = () => load(prevView);
+    $('next').onclick = () => load(nextView);
     $('main').querySelectorAll('.row').forEach((b) => b.addEventListener('click', () => {
       const c = state.data.categories.find((x) => x.id === Number(b.dataset.id));
       if (c) { selectCategory(c); $('value').focus(); }
     }));
 
-    $('sideFoot').innerHTML = d.started
-      ? `<b>Cycle ${d.currentCycle}</b>${dmy(describe(d).start)} – ${dmy(describe(d).end)}`
-      : `<b>Not started</b>Begins ${dmy(d.trackingStart)}`;
+    $('sideFoot').innerHTML = d.currentInfo
+      ? `<b>${cycleName(d.currentCycle)}</b>${dmy(d.currentInfo.start)} – ${dmy(d.currentInfo.end)}`
+      : `<b>Not open yet</b>Opens ${dmy(d.opensOn)}`;
 
     renderActivity();
     renderEntryContext();
     if (state.selected) { const fresh = state.data.categories.find((c) => c.id === state.selected.id); if (fresh) state.selected = fresh; renderCatInfo(); }
   }
-  // Date range of the live cycle (for sidebar) — derived from the viewed cycle's bounds.
-  function describe(d) {
-    const cy = d.cycle; const shift = (d.currentCycle || 1) - cy.n;
-    if (!shift) return cy;
-    const add = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
-    return { start: add(cy.start, shift * cy.days), end: add(cy.end, shift * cy.days) };
-  }
-
   function renderActivity() {
     const rows = state.data.recent;
     $('activity').innerHTML = rows.length ? rows.map((r) => `
@@ -419,7 +418,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
         <span class="t">${esc(r.category)}</span>
         <span class="v num">${money(r.value)}</span>
         <span class="m"><span>${esc(r.department)}</span><span>·</span><span>${esc(r.submittedBy)}</span><span>·</span><span class="num">${when(r.ts)}</span>
-          ${r.overLimit ? `<span class="pill over">${icons.warn}Over limit</span>` : ''}</span>
+          ${r.cycle === 0 ? '<span class="pill idle">Test</span>' : ''}${r.overLimit ? `<span class="pill over">${icons.warn}Over limit</span>` : ''}</span>
       </li>`).join('') : '<li class="empty" style="display:block">No entries yet. Submit the first one above.</li>';
   }
 
@@ -427,11 +426,11 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
     const d = state.data;
     const btn = $('submit');
     if (!d.started) {
-      $('entryHint').textContent = `Opens ${dmy(d.trackingStart)}`;
+      $('entryHint').textContent = `Opens ${dmy(d.opensOn)}`;
       btn.disabled = true;
-      btn.textContent = `Entries open on ${dmy(d.trackingStart)}`;
+      btn.textContent = `Entries open on ${dmy(d.opensOn)}`;
     } else {
-      $('entryHint').textContent = `Recording into Cycle ${d.currentCycle}`;
+      $('entryHint').textContent = d.phase === 'test' ? 'Recording into the Test Cycle (practice data)' : `Recording into ${cycleName(d.currentCycle)}`;
       btn.disabled = false;
       updatePreview();
     }
@@ -464,6 +463,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
     if (el) { input.setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); }
   }
   function selectCategory(c) {
+    c = state.data.categories.find((x) => x.id === c.id) || c; // use the freshest totals
     state.selected = c;
     input.value = c.name;
     $('dept').value = c.department;
@@ -549,6 +549,8 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
   $('by').value = store.get('doms.by') || '';
+  // One key per submission attempt: a double-click or retry reuses it, so the server saves it only once.
+  let requestId = crypto.randomUUID();
 
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -561,13 +563,14 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
 
     const btn = $('submit'); btn.disabled = true; const label = btn.textContent; btn.textContent = 'Submitting…';
     try {
-      const r = await fetch('/api/entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryId: state.selected.id, value: v, submittedBy: by }) });
+      const r = await fetch('/api/entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoryId: state.selected.id, value: v, submittedBy: by, requestId }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Could not save the entry.');
       store.set('doms.by', by);
-      toast(j.overLimit ? `Saved. ${j.category} is now over its limit (${money(j.received)} / ${money(j.limit)}).` : `Saved ${money(v)} for ${j.category} (${money(j.received)} / ${money(j.limit)}).`, j.overLimit);
+      requestId = crypto.randomUUID();
+      toast(j.duplicate ? 'That entry was already saved — not added twice.' : j.overLimit ? `Saved. ${j.category} is now over its limit (${money(j.received)} / ${money(j.limit)}).` : `Saved ${money(v)} for ${j.category} (${money(j.received)} / ${money(j.limit)}).`, j.overLimit);
       state.selected = null; input.value = ''; $('dept').value = ''; $('value').value = ''; $('catinfo').hidden = true;
-      await load(); // jump back to the live cycle
+      await load(); // back to today's cycle
     } catch (err) {
       fail(err.message);
       btn.textContent = label;
@@ -578,6 +581,10 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
   });
 
   load();
+
+  // Other people may be submitting too: refresh every 30s while the tab is visible and nothing is being submitted.
+  setInterval(() => { if (!document.hidden && $('submit').textContent !== 'Submitting…') load(state.view); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.data) load(state.view); });
 })();
 </script>
 </body>
