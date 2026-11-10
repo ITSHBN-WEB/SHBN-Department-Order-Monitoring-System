@@ -37,10 +37,11 @@ create index if not exists entries_created_idx   on entries (created_at desc);
 
 -- Tracking settings (only inserted if missing, so re-running never resets them)
 insert into settings (key, value) values
-  ('tracking_start', '2026-11-15'),   -- live cycle 1 starts here
+  ('tracking_start', '2026-11-01'),   -- live cycle 1 starts here
   ('cycle_days',     '45'),
-  ('test_start',     '2026-09-30'),   -- Test Cycle (practice data, stored as cycle 0)
-  ('test_end',       '2026-11-14')
+  ('test_start',     '2026-10-01'),   -- Test Cycle (practice data, stored as cycle 0)
+  ('test_end',       '2026-10-30'),
+  ('dates_v2',       '1')             -- marks that these dates are the current ones (see lib/db.js)
 on conflict (key) do nothing;
 
 update entries set submitted_by = upper(submitted_by) where submitted_by <> upper(submitted_by);

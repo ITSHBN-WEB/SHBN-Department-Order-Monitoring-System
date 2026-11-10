@@ -12,7 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sql = await createLocalDb();
 
 if (process.env.DEMO) {
-  // DEMO=1    -> sample entries inside the Test Cycle (default settings, today must be 30/09-14/11/2026)
+  // DEMO=1    -> sample entries inside the Test Cycle (default settings, today must be 01/10-30/10/2026; otherwise use DEMO=live)
   // DEMO=live -> pretend live tracking started 12 days ago and add sample entries to cycle 1
   const live = process.env.DEMO === 'live';
   if (live) {

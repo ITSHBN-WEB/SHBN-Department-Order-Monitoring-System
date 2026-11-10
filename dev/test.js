@@ -48,8 +48,9 @@ const cats = await sql`select count(*)::int n, sum(limit_value)::float8 total fr
 assert.equal(cats[0].n, 31);
 assert.equal(cats[0].total, 2217415);
 const st = Object.fromEntries((await sql`select key, value from settings`).map((r) => [r.key, r.value]));
-assert.equal(st.test_start, '2026-09-30');
-assert.equal(st.test_end, '2026-11-14');
+assert.equal(st.tracking_start, '2026-11-01');
+assert.equal(st.test_start, '2026-10-01');
+assert.equal(st.test_end, '2026-10-30');
 
 const rice = await catId('RICE'); // limit 178,126
 const post = (body) => call(entries, { method: 'POST', body: { categoryId: rice, submittedBy: 'Tester', ...body } });
@@ -61,10 +62,24 @@ const setTest = (a, b) => sql`insert into settings (key, value) values ('test_st
 await sql.raw('alter table entries drop column request_id');
 await sql`delete from settings where key in ('test_start','test_end')`;
 await ensureSchema(sql, true);
-assert.equal((await sql`select value from settings where key = 'test_start'`)[0].value, '2026-09-30');
+assert.equal((await sql`select value from settings where key = 'test_start'`)[0].value, '2026-10-01');
+
+// --- one-time move from the old dates to the new ones (existing deployments) -----------------
+await sql`update settings set value = '2026-11-15' where key = 'tracking_start'`;
+await sql`update settings set value = '2026-09-30' where key = 'test_start'`;
+await sql`update settings set value = '2026-11-14' where key = 'test_end'`;
+await sql`delete from settings where key = 'dates_v2'`;
+await ensureSchema(sql, true);
+const mig = Object.fromEntries((await sql`select key, value from settings`).map((r) => [r.key, r.value]));
+assert.deepEqual([mig.tracking_start, mig.test_start, mig.test_end, mig.dates_v2], ['2026-11-01', '2026-10-01', '2026-10-30', '1']);
+// ...and never again: a date changed later by hand survives the next start-up
+await sql`update settings set value = '2027-01-01' where key = 'tracking_start'`;
+await ensureSchema(sql, true);
+assert.equal((await sql`select value from settings where key = 'tracking_start'`)[0].value, '2027-01-01');
+await sql`update settings set value = '2026-11-01' where key = 'tracking_start'`;
 assert.equal((await sql`select count(*)::int n from information_schema.columns where table_name = 'entries' and column_name = 'request_id'`)[0].n, 1);
 
-// --- Test Cycle (today inside 30/09 - 14/11) ---------------------------------
+// --- Test Cycle window active today ---------------------------------
 await setStart(iso(5));
 await setTest(iso(-10), iso(4));
 let r = await call(dashboard);

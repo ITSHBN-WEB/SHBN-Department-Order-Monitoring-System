@@ -3,18 +3,18 @@
 Tracks stock value received per category against its limit, in repeating 45-day cycles.
 Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) · **GitHub**.
 
-- Tracking starts **15/11/2026**; cycle 1 = 15/11/2026 – 29/12/2026, cycle 2 starts 30/12/2026, and so on (automatic).
+- Live tracking starts **01/11/2026**; cycle 1 = 01/11/2026 – 15/12/2026, cycle 2 starts 16/12/2026, and so on (automatic).
 - Cycle length and start date live in the `settings` table (see "Changing settings").
 
-## Test Cycle (30/09/2026 – 14/11/2026)
+## Test Cycle (01/10/2026 – 30/10/2026)
 
 - Until live tracking starts, the app runs in a **Test Cycle**: entries are saved as practice data (cycle 0), tagged "Test" in Recent Activity, and **never counted in the live cycles**.
-- On 15/11/2026 the app switches to live Cycle 1 on its own, starting from zero. Test data stays viewable via the cycle arrows (Test Cycle <-> Cycle 1).
+- From 01/11/2026 the app runs live Cycle 1, starting from zero. Test data stays viewable via the cycle arrows (Test Cycle <-> Cycle 1).
 - Clear the practice data any time (Neon SQL Editor): `delete from entries where cycle_no = 0;`
-- Change the window: `update settings set value = '2026-09-30' where key = 'test_start';` (and `test_end`). To turn it off: `update settings set value = '' where key in ('test_start','test_end');`
+- Change the window: `update settings set value = '2026-10-01' where key = 'test_start';` (and `test_end`). To turn it off: `update settings set value = '' where key in ('test_start','test_end');`
 - The app upgrades an older database by itself (adds missing columns/settings on first request), so you don't have to re-run `db/setup.sql` after updating the code.
 - "Submitted By" is always stored in UPPERCASE.
-- Note: 30/09 – 14/11 is 46 days (inclusive), one more than a normal cycle.
+- Dates on existing databases are moved to these ones automatically, once, on first start after deploying; later changes you make in the database are never overwritten.
 
 ## Multiple users submitting at once
 
@@ -54,7 +54,7 @@ DEMO=1 npm run dev     # http://localhost:3000 with sample data (in-memory, rese
 ## Changing settings (no redeploy needed – run in Neon SQL Editor)
 
 ```sql
-update settings set value = '2026-11-15' where key = 'tracking_start';
+update settings set value = '2026-11-01' where key = 'tracking_start';
 update settings set value = '45'         where key = 'cycle_days';
 update categories set limit_value = 300000 where name = 'BEVERAGES';
 ```
