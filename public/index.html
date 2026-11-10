@@ -53,6 +53,8 @@ button, input { font: inherit; color: inherit; }
 .nav svg { width: 17px; height: 17px; flex: none; }
 .jump { display: none; margin-left: auto; background: var(--accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; padding: 8px 14px; border-radius: 9px; }
 .side-foot { margin-top: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 12px; color: var(--muted); }
+.badge { display: block; width: 104px; height: auto; margin: 12px auto 4px; opacity: .88; filter: saturate(.92); transition: opacity .2s; user-select: none; -webkit-user-drag: none; }
+.badge:hover { opacity: 1; }
 .side-foot b { display: block; color: var(--text); font-size: 13px; margin-bottom: 2px; }
 
 /* ---------- main header ---------- */
@@ -182,7 +184,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
   .app { grid-template-columns: 1fr; }
   .sidebar { grid-row: auto; position: static; height: auto; flex-direction: row; align-items: center; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0; }
-  .brand span, .nav-label, .side-foot { display: none; }
+  .brand span, .nav-label, .side-foot, .badge { display: none; }
   .jump { display: block; }
   html { scroll-behavior: smooth; }
   .main { padding: 18px 16px 8px; }
@@ -268,6 +270,7 @@ select.field { appearance: auto; }
     </nav>
     <a class="jump" href="#entry">+ New entry</a>
     <div class="side-foot" id="sideFoot"><b>Cycle –</b>Loading…</div>
+    <img class="badge" src="/krk-badge.png" alt="KRK" width="420" height="141" decoding="async">
   </aside>
 
   <main class="main" id="main" aria-live="polite">
