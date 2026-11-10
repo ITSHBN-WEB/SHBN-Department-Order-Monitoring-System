@@ -42,6 +42,8 @@ insert into settings (key, value) values
   ('test_end',       '2026-11-14')
 on conflict (key) do nothing;
 
+update entries set submitted_by = upper(submitted_by) where submitted_by <> upper(submitted_by);
+
 -- Department / category / limit value (from Department_Value.xlsx)
 insert into categories (department, name, limit_value, sort_order) values
   ('FOOD', 'BEVERAGES', 283802.00, 1),

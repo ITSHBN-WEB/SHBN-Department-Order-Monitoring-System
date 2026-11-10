@@ -124,6 +124,8 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
 .field { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; width: 100%; }
 .field:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .field[readonly] { color: var(--text); background: var(--surface-2); cursor: default; }
+.field.caps { text-transform: uppercase; }
+.field.caps::placeholder { text-transform: none; }
 .field::placeholder { color: var(--faint); }
 
 .combo { position: relative; }
@@ -241,7 +243,7 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
           </div>
           <div>
             <label for="by">Submitted By</label>
-            <input class="field" id="by" type="text" maxlength="60" autocomplete="name" placeholder="Your name">
+            <input class="field caps" id="by" type="text" maxlength="60" autocomplete="name" placeholder="Your name">
           </div>
           <div class="msg" id="msg" role="alert"></div>
           <button class="btn" id="submit" type="submit">Submit entry</button>
@@ -548,14 +550,15 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
     const t = $('toast'); t.textContent = text; t.className = 'toast' + (over ? ' over' : ''); t.hidden = false;
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
-  $('by').value = store.get('doms.by') || '';
+  $('by').value = (store.get('doms.by') || '').toUpperCase();
+  $('by').addEventListener('input', (e) => { const el = e.target, p = el.selectionStart; el.value = el.value.toUpperCase(); el.setSelectionRange(p, p); });
   // One key per submission attempt: a double-click or retry reuses it, so the server saves it only once.
   let requestId = crypto.randomUUID();
 
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const msg = $('msg'); msg.className = 'msg'; msg.textContent = '';
-    const v = parseValue(), by = $('by').value.trim();
+    const v = parseValue(), by = $('by').value.trim().toUpperCase();
     const fail = (t, el) => { msg.className = 'msg err'; msg.textContent = t; if (el) el.focus(); };
     if (!state.selected) return fail('Please select a category.', input);
     if (!(v > 0)) return fail('Enter a value greater than 0.', $('value'));

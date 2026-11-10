@@ -1,4 +1,4 @@
-import { getSql } from '../lib/db.js';
+import { getSql, ensureSchema } from '../lib/db.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 export default async function handler(req, res) {
@@ -7,6 +7,7 @@ export default async function handler(req, res) {
 
   try {
     const sql = getSql();
+    await ensureSchema(sql);
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { phase, started, current, opensOn, daysUntilStart } = currentCycle(settings, today);

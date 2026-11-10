@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { createLocalDb } from './pg.js';
 import { currentCycle, describeCycle } from '../lib/cycle.js';
+import { ensureSchema } from '../lib/db.js';
 
 const sql = await createLocalDb();
 const { default: dashboard } = await import('../api/dashboard.js');
@@ -55,6 +56,13 @@ const post = (body) => call(entries, { method: 'POST', body: { categoryId: rice,
 const noTest = () => sql`delete from settings where key in ('test_start','test_end')`;
 const setTest = (a, b) => sql`insert into settings (key, value) values ('test_start', ${a}), ('test_end', ${b})
   on conflict (key) do update set value = excluded.value`;
+
+// --- older database (no request_id column, no test settings) is upgraded automatically ---
+await sql.raw('alter table entries drop column request_id');
+await sql`delete from settings where key in ('test_start','test_end')`;
+await ensureSchema(sql, true);
+assert.equal((await sql`select value from settings where key = 'test_start'`)[0].value, '2026-09-30');
+assert.equal((await sql`select count(*)::int n from information_schema.columns where table_name = 'entries' and column_name = 'request_id'`)[0].n, 1);
 
 // --- Test Cycle (today inside 30/09 - 14/11) ---------------------------------
 await setStart(iso(5));
@@ -115,7 +123,7 @@ assert.equal(r.body.recent.length, 3);               // 2 live entries + the ear
 assert.equal(r.body.recent[2].cycle, 0);
 assert.equal(r.body.recent[0].overLimit, true);
 assert.equal(r.body.recent[1].overLimit, false);
-assert.equal(r.body.recent[1].submittedBy, 'Ali Baba');
+assert.equal(r.body.recent[1].submittedBy, 'ALI BABA');   // Submitted By is stored in capitals
 
 // --- simultaneous submissions ------------------------------------------------------
 const uuid = () => crypto.randomUUID();

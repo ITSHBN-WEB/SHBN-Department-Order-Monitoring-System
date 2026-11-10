@@ -11,7 +11,9 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 - Until live tracking starts, the app runs in a **Test Cycle**: entries are saved as practice data (cycle 0), tagged "Test" in Recent Activity, and **never counted in the live cycles**.
 - On 15/11/2026 the app switches to live Cycle 1 on its own, starting from zero. Test data stays viewable via the cycle arrows (Test Cycle <-> Cycle 1).
 - Clear the practice data any time (Neon SQL Editor): `delete from entries where cycle_no = 0;`
-- Change the window: `update settings set value = '2026-09-30' where key = 'test_start';` (and `test_end`). To turn it off: `delete from settings where key in ('test_start','test_end');`
+- Change the window: `update settings set value = '2026-09-30' where key = 'test_start';` (and `test_end`). To turn it off: `update settings set value = '' where key in ('test_start','test_end');`
+- The app upgrades an older database by itself (adds missing columns/settings on first request), so you don't have to re-run `db/setup.sql` after updating the code.
+- "Submitted By" is always stored in UPPERCASE.
 - Note: 30/09 – 14/11 is 46 days (inclusive), one more than a normal cycle.
 
 ## Multiple users submitting at once

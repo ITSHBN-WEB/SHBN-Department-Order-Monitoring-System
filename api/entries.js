@@ -1,4 +1,4 @@
-import { getSql } from '../lib/db.js';
+import { getSql, ensureSchema } from '../lib/db.js';
 import { loadSettings, currentCycle, todayKL } from '../lib/cycle.js';
 
 const fmtDMY = (s) => s.split('-').reverse().join('/');
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
   const categoryId = Number(body.categoryId);
   const value = Math.round(Number(body.value) * 100) / 100;
-  const submittedBy = String(body.submittedBy ?? '').trim().replace(/\s+/g, ' ');
+  const submittedBy = String(body.submittedBy ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
   const requestId = typeof body.requestId === 'string' && UUID.test(body.requestId) ? body.requestId.toLowerCase() : null;
 
   if (!Number.isInteger(categoryId) || categoryId < 1) return res.status(400).json({ error: 'Please select a category.' });
@@ -37,6 +37,7 @@ export default async function handler(req, res) {
 
   try {
     const sql = getSql();
+    await ensureSchema(sql);
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { started, current, opensOn } = currentCycle(settings, today);
