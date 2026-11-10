@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     return res.status(duplicate ? 200 : 201).json({
       ok: true,
       duplicate,
-      id,
+      id: Number(id),
       category: cat[0].name,
       department: cat[0].department,
       cycle,

@@ -78,7 +78,9 @@ export default async function handler(req, res) {
             and (${catId}::int is null or e.category_id = ${catId}::int)
           order by e.id desc
           limit ${MAX_ROWS + 1}`;
-        return res.status(200).json({ entries: rows.slice(0, MAX_ROWS), truncated: rows.length > MAX_ROWS });
+        // bigint ids arrive as text from Neon; the page compares them strictly, so send real numbers
+        const entries = rows.slice(0, MAX_ROWS).map((r) => ({ ...r, id: Number(r.id) }));
+        return res.status(200).json({ entries, truncated: rows.length > MAX_ROWS });
       }
 
       case 'save': {

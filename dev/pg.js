@@ -8,7 +8,8 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export async function createLocalDb() {
-  const db = new PGlite();
+  // Like Neon / node-postgres, return bigint (int8) columns as strings so tests catch id-type bugs.
+  const db = new PGlite({ parsers: { 20: (v) => v } });
   await db.exec(readFileSync(join(root, 'db/setup.sql'), 'utf8'));
   const sql = (strings, ...vals) => {
     const text = strings.reduce((acc, s, i) => acc + s + (i < vals.length ? `$${i + 1}` : ''), '');

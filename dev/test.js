@@ -199,6 +199,7 @@ r = await adm({ action: 'list', cycle: 2, department: 'NONFOOD', categoryId: bab
 assert.deepEqual(r.body.entries.map((e) => e.value).sort(), [100, 200]);
 assert.equal(r.body.entries[0].department, 'NONFOOD');
 const [e1, e2] = r.body.entries;
+assert.equal(typeof e1.id, 'number');   // the page compares ids with ===, so they must be numbers (Neon returns bigint as text)
 
 // edit one (value + category + name), delete another, in a single save
 r = await adm({ action: 'save', updates: [{ id: e1.id, categoryId: pet, value: '250.456', submittedBy: ' new  name ' }], deletes: [e2.id] });

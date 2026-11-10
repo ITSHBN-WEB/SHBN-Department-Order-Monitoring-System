@@ -147,6 +147,9 @@ label, .lbl { display: block; font-size: 12px; font-weight: 600; color: var(--mu
 .preview.near { color: var(--warn); }
 .preview.ok { color: var(--ok); }
 
+.clear-row { display: flex; justify-content: flex-end; margin-top: -8px; }
+.linkbtn { background: none; border: 1px solid var(--line); color: var(--muted); padding: 4px 14px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+.linkbtn:hover { color: var(--text); border-color: var(--faint); }
 .btn { border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; padding: 12px 14px; cursor: pointer; width: 100%; }
 .btn:hover:not(:disabled) { filter: brightness(1.08); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
@@ -299,6 +302,7 @@ select.field { appearance: auto; }
             <label for="by">Submitted By</label>
             <input class="field caps" id="by" type="text" maxlength="60" autocomplete="name" placeholder="Your name">
           </div>
+          <div class="clear-row"><button type="button" class="linkbtn" id="clearBtn" title="Clear all fields">Clear</button></div>
           <div class="msg" id="msg" role="alert"></div>
           <button class="btn" id="submit" type="submit">Submit entry</button>
         </form>
@@ -638,6 +642,17 @@ select.field { appearance: auto; }
     }
   });
 
+  // Clear: empties every field of the New Entry form and starts a fresh submission attempt.
+  $('clearBtn').addEventListener('click', () => {
+    state.selected = null;
+    input.value = ''; $('dept').value = ''; $('value').value = ''; $('by').value = '';
+    $('catinfo').hidden = true; closeList();
+    $('msg').className = 'msg'; $('msg').textContent = '';
+    requestId = crypto.randomUUID();
+    updatePreview();
+    input.focus();
+  });
+
   load();
 
   /* ======================= views + Admin ======================= */
@@ -727,7 +742,7 @@ select.field { appearance: auto; }
     renderAdmin();
     try {
       const j = await adminCall('list', { cycle: A.cycle, department: A.dept || undefined, categoryId: A.cat ? Number(A.cat) : undefined });
-      A.entries = j.entries; A.truncated = j.truncated;
+      A.entries = j.entries.map((e) => ({ ...e, id: Number(e.id) })); A.truncated = j.truncated;
       A.staged.clear(); A.editing.clear();
     } catch (err) { if (err.auth) return; A.msg = err.message; }
     A.loading = false;
