@@ -281,7 +281,7 @@ select.field { appearance: auto; }
     <h3 style="margin:0;font-size:17px">Sign in</h3>
     <div class="hint" style="color:var(--muted);font-size:13px;margin-top:2px">Use your account code and password.</div>
     <label for="lgUser">Account</label>
-    <input class="field caps" id="lgUser" type="text" autocomplete="username" autocapitalize="characters" spellcheck="false" placeholder="e.g. 1008-SHBN">
+    <select class="field" id="lgUser" autocomplete="username" aria-label="Account"><option value="">Select account…</option></select>
     <label for="lgPass">Password</label>
     <input class="field" id="lgPass" type="password" autocomplete="current-password" placeholder="Password">
     <div class="msg err" id="lgMsg" role="alert"></div>
@@ -975,7 +975,7 @@ select.field { appearance: auto; }
     app.hidden = true; loginWrap.hidden = false;
     $('lgMsg').textContent = msg || '';
     $('lgPass').value = '';
-    setTimeout(() => ($('lgUser').value ? $('lgPass') : $('lgUser')).focus(), 0);
+    loadAccounts().then(() => setTimeout(() => ($('lgUser').value ? $('lgPass') : $('lgUser')).focus(), 0));
   }
   function showApp(account) {
     state.auth = account;
@@ -1001,12 +1001,21 @@ select.field { appearance: auto; }
     $('lgUser').value = '';
   }
   $('logoutBtn').addEventListener('click', logout);
-  $('lgUser').addEventListener('input', (e) => { const el = e.target, p = el.selectionStart; el.value = el.value.toUpperCase(); el.setSelectionRange(p, p); });
+  // Fill the Account dropdown from the server (so new accounts appear without changing the page).
+  async function loadAccounts() {
+    const sel = $('lgUser');
+    if (sel.options.length > 1) return;
+    try {
+      const r = await fetch('/api/auth?accounts=1', { cache: 'no-store' });
+      const j = await r.json();
+      (j.accounts || []).forEach((c) => sel.add(new Option(c, c)));
+    } catch { $('lgMsg').textContent = 'Could not load the account list. Check your connection and refresh.'; }
+  }
   $('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const u = $('lgUser').value.trim(), pw = $('lgPass').value;
     const msg = $('lgMsg'); msg.textContent = '';
-    if (!u || !pw) { msg.textContent = 'Enter your account and password.'; return; }
+    if (!u || !pw) { msg.textContent = u ? 'Enter your password.' : 'Select your account and enter your password.'; return; }
     const btn = $('lgBtn'); btn.disabled = true; btn.textContent = 'Signing in…';
     try {
       const r = await authPost({ action: 'login', username: u, password: pw });

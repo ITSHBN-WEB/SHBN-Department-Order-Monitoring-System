@@ -4,6 +4,7 @@ import { verifyPassword, dummyHash, signSession, readSession, sessionCookie } fr
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
+ *  GET  /api/auth?accounts=1                      -> list of account codes for the sign-in dropdown (no sign-in needed)
  *  GET  /api/auth                                 -> who is signed in (401 if nobody)
  *  POST /api/auth { action: 'login', username, password }
  *  POST /api/auth { action: 'logout' }
@@ -14,6 +15,10 @@ export default async function handler(req, res) {
     const sql = getSql();
     await ensureSchema(sql);
 
+    if (req.method === 'GET' && req.query?.accounts) {
+      const rows = await sql`select code from accounts order by code`;
+      return res.status(200).json({ accounts: rows.map((r) => r.code) });
+    }
     if (req.method === 'GET') {
       const s = readSession(req);
       const found = s ? await sql`select code from accounts where code = ${s.code}` : [];

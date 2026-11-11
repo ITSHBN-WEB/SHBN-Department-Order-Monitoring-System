@@ -248,6 +248,8 @@ assert.equal((await login('1008-SHBN', 'wrong')).code, 401);
 assert.equal((await login('9999-NONE', 'pw-bn')).code, 401);
 assert.equal((await login('1008-SHBN', '')).code, 401);
 assert.equal((await login('1015-SHPL', 'pw-bn')).code, 401);                  // another account's password
+r = await call(auth, { as: null, query: { accounts: '1' } });                    // sign-in dropdown list (public)
+assert.deepEqual(r.body, { accounts: ['1007-SHPP', '1008-SHBN', '1015-SHPL'] });
 r = await login(' 1015-shpl ', 'pw-pl');                                       // trimmed + case-insensitive
 assert.equal(r.code, 200);
 assert.equal(r.body.account.code, '1015-SHPL');
