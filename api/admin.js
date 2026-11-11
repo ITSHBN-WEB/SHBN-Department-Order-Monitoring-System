@@ -1,15 +1,15 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { getSql, ensureSchema } from '../lib/db.js';
+import { requireAccount, adminScope } from '../lib/auth.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 /**
  * Admin API (edit / delete submitted entries). One endpoint, POST only:
  *   { action: 'login' | 'meta' | 'list' | 'save', password, ... }
- * The password is checked here on the server for every call. Default is 8888;
- * set the ADMIN_PASSWORD environment variable in Vercel to change it without touching code.
+ * Every call needs (1) a signed-in account and (2) an admin password, both checked here on the server:
+ *   - the per-account admin password  -> scope 'account': only the signed-in account's own entries
+ *   - the head-office admin password  -> scope 'hq': entries of ALL accounts
+ * Passwords are stored as hashes in the settings table (see scripts/hash-password.js to change them).
  */
-const sha = (s) => createHash('sha256').update(String(s)).digest();
-const passwordOk = (given) => timingSafeEqual(sha(given ?? ''), sha(process.env.ADMIN_PASSWORD || '8888'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MAX_ROWS = 500;
@@ -25,25 +25,31 @@ export default async function handler(req, res) {
   }
   body = body || {};
 
-  if (!passwordOk(body.password)) {
-    await sleep(400); // slows down password guessing
-    return res.status(401).json({ error: 'Incorrect password.' });
-  }
-
   try {
     const sql = getSql();
     await ensureSchema(sql);
+    const acct = await requireAccount(req, res, sql);
+    if (!acct) return;
+
+    const scope = await adminScope(sql, body.password);
+    if (!scope) {
+      await sleep(400); // slows down password guessing
+      return res.status(401).json({ error: 'Incorrect password.', code: 'password' });
+    }
+    const hq = scope === 'hq';
 
     switch (body.action) {
       case 'login':
-        return res.status(200).json({ ok: true });
+        return res.status(200).json({ ok: true, scope, account: acct });
 
       case 'meta': {
         const settings = await loadSettings(sql);
         const today = todayKL();
         const { phase, current } = currentCycle(settings, today);
+        const only = hq ? null : acct;
         const counts = Object.fromEntries(
-          (await sql`select cycle_no, count(*)::int as n from entries group by cycle_no`).map((r) => [r.cycle_no, r.n]),
+          (await sql`select cycle_no, count(*)::int as n from entries
+                     where (${only}::text is null or account = ${only}::text) group by cycle_no`).map((r) => [r.cycle_no, r.n]),
         );
         const cycles = [];
         if (settings.test || counts[0]) {
@@ -57,7 +63,8 @@ export default async function handler(req, res) {
         }
         const categories = await sql`select id, department, name from categories order by sort_order, id`;
         const defaultCycle = phase === 'upcoming' ? (cycles[0]?.n ?? 1) : current;
-        return res.status(200).json({ cycles, categories, defaultCycle });
+        const accounts = hq ? (await sql`select code from accounts order by code`).map((r) => r.code) : [acct];
+        return res.status(200).json({ scope, account: acct, accounts, cycles, categories, defaultCycle });
       }
 
       case 'list': {
@@ -65,10 +72,11 @@ export default async function handler(req, res) {
         if (!Number.isInteger(cycle) || cycle < 0) return res.status(400).json({ error: 'Choose a period.' });
         const dept = typeof body.department === 'string' && body.department ? body.department : null;
         const catId = body.categoryId ? Number(body.categoryId) : null;
+        const only = hq ? (typeof body.account === 'string' && body.account ? body.account : null) : acct;
         if (catId !== null && !Number.isInteger(catId)) return res.status(400).json({ error: 'Invalid category.' });
 
         const rows = await sql`
-          select e.id, e.category_id as "categoryId", c.name as category, c.department,
+          select e.id, e.account, e.category_id as "categoryId", c.name as category, c.department,
                  e.value::float8 as value, e.submitted_by as "submittedBy", e.cycle_no as cycle,
                  (extract(epoch from e.created_at) * 1000)::float8 as ts,
                  (extract(epoch from e.edited_at) * 1000)::float8 as "editedAt"
@@ -76,6 +84,7 @@ export default async function handler(req, res) {
           where e.cycle_no = ${cycle}::int
             and (${dept}::text is null or c.department = ${dept}::text)
             and (${catId}::int is null or e.category_id = ${catId}::int)
+            and (${only}::text is null or e.account = ${only}::text)
           order by e.id desc
           limit ${MAX_ROWS + 1}`;
         // bigint ids arrive as text from Neon; the page compares them strictly, so send real numbers
@@ -117,17 +126,17 @@ export default async function handler(req, res) {
                set category_id = u.category_id, value = u.value, submitted_by = u.submitted_by, edited_at = now()
               from unnest(${ids}::bigint[], ${cats}::int[], ${vals}::numeric[], ${bys}::text[])
                    as u(id, category_id, value, submitted_by)
-             where e.id = u.id
+             where e.id = u.id and (${hq}::boolean or e.account = ${acct}::text)
             returning e.id
           ), del as (
-            delete from entries where id = any(${deletes}::bigint[]) returning id
+            delete from entries where id = any(${deletes}::bigint[]) and (${hq}::boolean or account = ${acct}::text) returning id
           )
           select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted`;
         return res.status(200).json({
           ok: true,
           updated: out[0].updated,
           deleted: out[0].deleted,
-          missing: ids.length + deletes.length - out[0].updated - out[0].deleted, // already removed by someone else
+          missing: ids.length + deletes.length - out[0].updated - out[0].deleted, // already removed, or not in your scope
         });
       }
 

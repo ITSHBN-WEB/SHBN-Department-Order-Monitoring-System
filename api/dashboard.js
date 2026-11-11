@@ -1,4 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
+import { requireAccount } from '../lib/auth.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 export default async function handler(req, res) {
@@ -8,6 +9,8 @@ export default async function handler(req, res) {
   try {
     const sql = getSql();
     await ensureSchema(sql);
+    const acct = await requireAccount(req, res, sql);
+    if (!acct) return;
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { phase, started, current, opensOn, daysUntilStart } = currentCycle(settings, today);
@@ -28,7 +31,7 @@ export default async function handler(req, res) {
              (count(e.id) filter (where e.cycle_no = ${view}::int))::int as entries
       from categories c
       left join entries e
-        on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int)
+        on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int) and e.account = ${acct}::text
       group by c.id
       order by c.sort_order, c.id`;
 
@@ -42,11 +45,13 @@ export default async function handler(req, res) {
                (sum(e.value) over (partition by e.category_id, e.cycle_no order by e.id))::float8 as running,
                c.limit_value::float8 as "limit"
         from entries e join categories c on c.id = e.category_id
+        where e.account = ${acct}::text
       ) t
       order by id desc
       limit 15`;
 
     return res.status(200).json({
+      account: acct,
       today,
       phase,
       started,

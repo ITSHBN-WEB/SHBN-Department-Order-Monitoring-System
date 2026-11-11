@@ -1,4 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
+import { requireAccount } from '../lib/auth.js';
 import { loadSettings, currentCycle, todayKL } from '../lib/cycle.js';
 
 const fmtDMY = (s) => s.split('-').reverse().join('/');
@@ -38,6 +39,8 @@ export default async function handler(req, res) {
   try {
     const sql = getSql();
     await ensureSchema(sql);
+    const acct = await requireAccount(req, res, sql);
+    if (!acct) return;
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { started, current, opensOn } = currentCycle(settings, today);
@@ -51,15 +54,15 @@ export default async function handler(req, res) {
     let duplicate = false;
     let id, cycle;
     const ins = await sql`
-      insert into entries (category_id, value, submitted_by, entry_date, cycle_no, request_id)
-      values (${categoryId}, ${value}, ${submittedBy}, ${today}, ${current}, ${requestId}::uuid)
+      insert into entries (account, category_id, value, submitted_by, entry_date, cycle_no, request_id)
+      values (${acct}, ${categoryId}, ${value}, ${submittedBy}, ${today}, ${current}, ${requestId}::uuid)
       on conflict (request_id) do nothing
       returning id, cycle_no`;
     if (ins.length) {
       ({ id, cycle_no: cycle } = ins[0]);
     } else {
       // Same requestId already saved (double-click / retry): report the original entry.
-      const prev = await sql`select id, cycle_no from entries where request_id = ${requestId}::uuid`;
+      const prev = await sql`select id, cycle_no from entries where request_id = ${requestId}::uuid and account = ${acct}`;
       if (!prev.length) return res.status(500).json({ error: 'Could not save the entry. Please try again.' });
       ({ id, cycle_no: cycle } = prev[0]);
       duplicate = true;
@@ -68,7 +71,7 @@ export default async function handler(req, res) {
     // Category total as of this entry (ids only ever increase).
     const tot = await sql`
       select coalesce(sum(value), 0)::float8 as received
-      from entries where category_id = ${categoryId} and cycle_no = ${cycle} and id <= ${id}`;
+      from entries where account = ${acct} and category_id = ${categoryId} and cycle_no = ${cycle} and id <= ${id}`;
     const received = tot[0].received;
 
     return res.status(duplicate ? 200 : 201).json({

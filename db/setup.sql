@@ -16,8 +16,20 @@ create table if not exists settings (
   value text not null
 );
 
+-- Sign-in accounts. password_hash is a salted scrypt hash, never the password itself.
+create table if not exists accounts (
+  code          text primary key,       -- e.g. 1008-SHBN
+  password_hash text not null
+);
+insert into accounts (code, password_hash) values
+  ('1008-SHBN', 'scrypt$ia2gX+KUSB3nW1jC8aef+w==$PKGBjpoL3ejiiArnmeyw9QEWyRPpZpHe6dOlV2ORhFU='),
+  ('1015-SHPL', 'scrypt$vXeP8idFovCslQTG6+nFig==$XSjpgYxxyfSYxkKSmLBKYqfugwmFRuNbBvGNvk/a5vY='),
+  ('1007-SHPP', 'scrypt$m7zUpXYQbgzUqS7/tVwqUQ==$VsCbLcRb3fpqqzQXRNRv8kJtZOEIlpgQlqrx8xdStH8=')
+on conflict (code) do nothing;
+
 create table if not exists entries (
   id           bigserial primary key,
+  account      text not null references accounts(code),   -- which account (store) made the entry
   category_id  int  not null references categories(id),
   value        numeric(14,2) not null check (value > 0),
   submitted_by text not null,
@@ -32,6 +44,12 @@ alter table entries add column if not exists request_id uuid;
 alter table entries add column if not exists edited_at timestamptz;   -- set when an admin edits an entry
 create unique index if not exists entries_request_id_uq on entries (request_id);
 
+-- Upgrading an older database: add the account column and give existing entries to 1008-SHBN
+alter table entries add column if not exists account text;
+update entries set account = '1008-SHBN' where account is null;
+alter table entries alter column account set not null;
+create index if not exists entries_account_idx on entries (account, cycle_no, category_id);
+
 create index if not exists entries_cycle_cat_idx on entries (cycle_no, category_id);
 create index if not exists entries_created_idx   on entries (created_at desc);
 
@@ -45,6 +63,12 @@ insert into settings (key, value) values
 on conflict (key) do nothing;
 
 update entries set submitted_by = upper(submitted_by) where submitted_by <> upper(submitted_by);
+
+-- Admin tab passwords (hashes): per-account admin, and head-office admin for all accounts
+insert into settings (key, value) values
+  ('admin_hash', 'scrypt$qP7RAkDQl1NnTCqtf8vfSg==$nZNWs6aZhMi8nvE1TpfMrP+iOgr3fngnDTaK+kDUZYo='),
+  ('hq_hash',    'scrypt$00Ft+txDUte+/JMCX8EF7g==$pnMXq/AF6ZmfvMwS1DN1Rb4xRdmfGKYZDCjRYTj1xmA=')
+on conflict (key) do nothing;
 
 -- Department / category / limit value (from Department_Value.xlsx)
 insert into categories (department, name, limit_value, sort_order) values

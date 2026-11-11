@@ -30,8 +30,8 @@ if (process.env.DEMO) {
     ['BATTERY / LIGHT SOURCE', 2900, 'Farid'], ['COOKING OIL', 33000, 'Aminah'],
   ];
   for (const [name, value, by] of demo) {
-    await sql`insert into entries (category_id, value, submitted_by, entry_date, cycle_no, created_at)
-      select id, ${value}, ${by}, ${today}, ${cycleNo}, now() - (random() * interval '10 days') from categories where name = ${name}`;
+    await sql`insert into entries (account, category_id, value, submitted_by, entry_date, cycle_no, created_at)
+      select '1008-SHBN', id, ${value}, ${by}, ${today}, ${cycleNo}, now() - (random() * interval '10 days') from categories where name = ${name}`;
   }
   console.log('DEMO data loaded into', live ? 'live cycle 1' : 'the Test Cycle');
 }
@@ -39,7 +39,8 @@ if (process.env.DEMO) {
 const { default: dashboard } = await import('../api/dashboard.js');
 const { default: entries } = await import('../api/entries.js');
 const { default: admin } = await import('../api/admin.js');
-const routes = { '/api/dashboard': dashboard, '/api/entries': entries, '/api/admin': admin };
+const { default: auth } = await import('../api/auth.js');
+const routes = { '/api/dashboard': dashboard, '/api/entries': entries, '/api/admin': admin, '/api/auth': auth };
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 http.createServer(async (req, res) => {

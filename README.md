@@ -24,14 +24,24 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 - The dashboard auto-refreshes every 30 seconds so everyone sees each other's entries.
 - `npm test` covers 25 simultaneous users and a double-click sent 6 times at once.
 
+## Accounts and sign-in
+
+- Three accounts: **1008-SHBN**, **1015-SHPL**, **1007-SHPP**. Everyone signs in on the first screen with their account code and password.
+- **Each account's data is completely separate**: its own entries, totals, recent activity and Admin list. All accounts use the same category limits and the same cycle dates.
+- Passwords are stored only as salted hashes (never in plain text, never in this repo). The sign-in lasts 12 hours or until **Log out** (which also forgets the remembered name).
+- Existing entries made before accounts existed are assigned to **1008-SHBN** automatically (once, on the first start after deploying).
+- Change a password: `node scripts/hash-password.js "NewPassword"` prints the hash and the SQL to run in the Neon SQL Editor.
+- Optional: set `SESSION_SECRET` in Vercel to use your own session-signing key (otherwise one is derived from `DATABASE_URL`).
+
 ## Admin tab (edit / delete entries)
 
-- Sidebar -> **Admin**, password **8888** (checked on the server for every request, not just in the browser).
-- To change it without editing code: in Vercel add the environment variable `ADMIN_PASSWORD` and redeploy.
+- Sidebar -> **Admin**. You must be signed in, and then enter an admin password (checked on the server for every request):
+  - **Account admin password** -> edit/delete only the signed-in account's own entries.
+  - **Head-office password** -> edit/delete entries of **all** accounts. Extra "Account" filter and column; an entry's account itself cannot be changed.
 - Flow: pick the **Period (cycle)** -> filter by **Department** -> optionally a **Category** -> **Edit** (category, value, submitted by) or **Delete** a row -> press **Save changes**.
 - Edits and deletions are staged first (rows are highlighted, **Undo** is available) and only written when you press Save. All changes are saved together, all-or-nothing.
-- Edited entries show an "Edited" tag. The admin session locks after 15 minutes of inactivity, or with the Lock button.
-- Dashboard totals follow immediately, because they are always calculated from the entries.
+- Edited entries show an "Edited" tag. The admin view locks after 15 minutes of inactivity, or with the Lock button.
+- Change the admin passwords with `scripts/hash-password.js` (it prints the SQL for `admin_hash` and `hq_hash`).
 
 ## Deploy (once)
 
@@ -58,7 +68,7 @@ update settings set value = '2026-11-01' where key = 'tracking_start';
 update settings set value = '45'         where key = 'cycle_days';
 update categories set limit_value = 300000 where name = 'BEVERAGES';
 ```
-Re-running `db/setup.sql` is safe (and is required once if you ran an older version: it adds the request-id column and test settings): it refreshes limits from the Excel list and never deletes entries.
+Re-running `db/setup.sql` is safe (it is not required after updating the code: the app upgrades an older database by itself): it refreshes limits from the Excel list and never deletes entries.
 
 ## Layout
 
@@ -66,6 +76,8 @@ Re-running `db/setup.sql` is safe (and is required once if you ran an older vers
 public/index.html   the whole UI (sidebar, dashboard, New Entry, Recent Activity)
 api/dashboard.js    GET  – categories, totals, recent activity, cycle info
 api/entries.js      POST – validate + save an entry
+api/auth.js         sign in / sign out / who am I
+api/admin.js        Admin tab API (account scope or head-office scope)
 lib/                Neon connection + cycle maths
 db/setup.sql        tables + seed from Department_Value.xlsx
 dev/                local server and tests (not deployed)
