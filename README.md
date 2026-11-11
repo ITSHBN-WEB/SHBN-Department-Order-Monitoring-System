@@ -24,10 +24,21 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 - The dashboard auto-refreshes every 30 seconds so everyone sees each other's entries.
 - `npm test` covers 25 simultaneous users and a double-click sent 6 times at once.
 
+## Limits per account
+
+- `data/Department_Value.xlsx` has one sheet per account: **SHBN -> 1008-SHBN**, **SHPL -> 1015-SHPL**, **SHPP -> 1007-SHPP** (same 31 categories, different limits).
+- The limits are loaded into the `account_limits` table automatically, once, on the first start after deploying. After that, edits you make in the database are never overwritten.
+- Change one limit (Neon SQL Editor, no redeploy):
+  ```sql
+  update account_limits set limit_value = 300000
+   where account = '1015-SHPL' and category_id = (select id from categories where name = 'BEVERAGES');
+  ```
+- To reload everything from a new workbook, send it to me and I'll regenerate `db/setup.sql`; re-running that file refreshes all limits (entries are never touched).
+
 ## Accounts and sign-in
 
 - Three accounts: **1008-SHBN**, **1015-SHPL**, **1007-SHPP**. Everyone signs in on the first screen with their account code and password.
-- **Each account's data is completely separate**: its own entries, totals, recent activity and Admin list. All accounts use the same category limits and the same cycle dates.
+- **Each account's data is completely separate**: its own entries, totals, recent activity and Admin list, tracked against **its own category limits** (see below). All accounts share the same cycle dates.
 - Passwords are stored only as salted hashes (never in plain text, never in this repo). The sign-in lasts 12 hours or until **Log out** (which also forgets the remembered name).
 - Existing entries made before accounts existed are assigned to **1008-SHBN** automatically (once, on the first start after deploying).
 - Change a password: `node scripts/hash-password.js "NewPassword"` prints the hash and the SQL to run in the Neon SQL Editor.
@@ -79,6 +90,6 @@ api/entries.js      POST – validate + save an entry
 api/auth.js         sign in / sign out / who am I
 api/admin.js        Admin tab API (account scope or head-office scope)
 lib/                Neon connection + cycle maths
-db/setup.sql        tables + seed from Department_Value.xlsx
+db/setup.sql        tables + seed (categories, accounts, per-account limits) from Department_Value.xlsx
 dev/                local server and tests (not deployed)
 ```

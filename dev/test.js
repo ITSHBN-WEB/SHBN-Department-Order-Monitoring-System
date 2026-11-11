@@ -4,6 +4,7 @@ import { createLocalDb } from './pg.js';
 import { currentCycle, describeCycle } from '../lib/cycle.js';
 import { ensureSchema } from '../lib/db.js';
 import { hashPassword, signSession } from '../lib/auth.js';
+import { LIMITS } from '../lib/seed.js';
 
 const sql = await createLocalDb();
 const { default: dashboard } = await import('../api/dashboard.js');
@@ -286,15 +287,36 @@ assert.equal((await riceOf('1007-SHPP')).received, 7);
 assert.equal((await call(dashboard, { as: '1015-SHPL' })).body.recent.length, 2);              // only its own activity
 assert.equal((await call(dashboard, { as: '1015-SHPL' })).body.account, '1015-SHPL');
 // the "over limit" result is judged on the account's own total, not the sum across accounts
-assert.equal((await asAcct('1007-SHPP', { value: 178126 })).body.received, 178133);
-assert.equal((await asAcct('1007-SHPP', { value: 1 })).body.overLimit, true);
-assert.equal((await asAcct('1008-SHBN', { value: 1 })).body.overLimit, false);
+const riceLimit = (code) => LIMITS.find((l) => l[0] === code && l[2] === 'RICE')[3];
+assert.notEqual(riceLimit('1007-SHPP'), riceLimit('1008-SHBN'));                // accounts really have different limits
+r = await asAcct('1007-SHPP', { value: riceLimit('1007-SHPP') - 7 });          // 7 + (limit - 7) = exactly its own limit
+assert.deepEqual([r.body.received, r.body.limit, r.body.overLimit], [riceLimit('1007-SHPP'), riceLimit('1007-SHPP'), false]);
+assert.equal((await asAcct('1007-SHPP', { value: 1 })).body.overLimit, true);   // 1 over ITS limit
+assert.equal((await asAcct('1008-SHBN', { value: 1 })).body.overLimit, false);  // 1008's own total is far below ITS limit
 // a request id used by one account can't be replayed to read or hit another account's entry
 const sharedRid = crypto.randomUUID();
 const first = await asAcct('1008-SHBN', { value: 5, requestId: sharedRid });
 assert.equal(first.code, 201);
 const replay = await asAcct('1015-SHPL', { value: 5, requestId: sharedRid });
 assert.notEqual(replay.code, 201);
+
+// --- Limits are per account (from the three workbook sheets) ------------------------------------------------
+const totals = Object.fromEntries((await sql`select account, sum(limit_value)::float8 t, count(*)::int n from account_limits group by account`).map((x) => [x.account, [x.t, x.n]]));
+assert.deepEqual(totals, { '1008-SHBN': [2217415, 31], '1015-SHPL': [1376243, 31], '1007-SHPP': [1361166, 31] });
+for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) {
+  const d = (await call(dashboard, { as: code })).body.categories;
+  assert.equal(d.length, 31);
+  assert.equal(d.reduce((a, c) => a + c.limit, 0), totals[code][0]);               // the dashboard shows THIS account's limits
+  assert.equal(d.find((c) => c.name === 'RICE').limit, riceLimit(code));
+  assert.equal((await call(dashboard, { as: code })).body.recent.every((x) => typeof x.limit === 'number'), true);
+}
+// the limit shown in Recent Activity / used for "Over limit" is the account's own too
+const ppRecent = (await call(dashboard, { as: '1007-SHPP' })).body.recent;
+assert.ok(ppRecent.every((x) => x.limit === riceLimit('1007-SHPP')) && ppRecent[0].overLimit === true);
+// an account without its own limit row falls back to the default list instead of breaking
+await sql`delete from account_limits where account = '1015-SHPL' and category_id = ${rice2}`;
+assert.equal((await call(dashboard, { as: '1015-SHPL' })).body.categories.find((c) => c.name === 'RICE').limit, riceLimit('1008-SHBN'));
+await sql`insert into account_limits (account, category_id, limit_value) values ('1015-SHPL', ${rice2}, ${riceLimit('1015-SHPL')})`;
 
 // --- Admin: per-account scope (admin password) vs head office (hq password) ----------------------
 const ids = Object.fromEntries((await sql`select account, min(id)::int as id from entries group by account`).map((x) => [x.account, x.id]));
@@ -346,6 +368,12 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   assert.deepEqual(rows.map((x) => x.account), ['1008-SHBN', '1008-SHBN']);
   assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 3);
   assert.equal((await oldSql`select count(*)::int n from settings where key in ('admin_hash', 'hq_hash')`)[0].n, 2);
+  const lim = await oldSql`select account, limit_value::float8 v from account_limits order by account`;           // RICE got one row per account
+  assert.deepEqual(lim.map((x) => x.account), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
+  assert.deepEqual(lim.map((x) => x.v), ['1007-SHPP', '1008-SHBN', '1015-SHPL'].map((c) => LIMITS.find((l) => l[0] === c && l[2] === 'RICE')[3]));
+  await oldSql`update account_limits set limit_value = 5 where account = '1008-SHBN'`;                             // a manual change...
+  await ensureSchema(oldSql, true);
+  assert.equal((await oldSql`select limit_value::float8 v from account_limits where account = '1008-SHBN'`)[0].v, 5);  // ...survives later start-ups
   await assert.rejects(() => old.query(`insert into entries (category_id, value, submitted_by, entry_date, cycle_no) values (1, 1, 'X', '2026-11-10', 1)`)); // account is now required
   await ensureSchema(oldSql, true);               // running it again changes nothing
   assert.equal((await oldSql`select count(*)::int n from entries`)[0].n, 2);

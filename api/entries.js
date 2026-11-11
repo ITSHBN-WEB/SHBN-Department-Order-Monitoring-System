@@ -48,7 +48,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: `Entries open on ${fmtDMY(opensOn)}.` });
     }
 
-    const cat = await sql`select id, name, department, limit_value::float8 as "limit" from categories where id = ${categoryId}`;
+    const cat = await sql`
+      select c.id, c.name, c.department, coalesce(al.limit_value, c.limit_value)::float8 as "limit"
+      from categories c
+      left join account_limits al on al.category_id = c.id and al.account = ${acct}
+      where c.id = ${categoryId}`;
     if (!cat.length) return res.status(400).json({ error: 'Unknown category.' });
 
     let duplicate = false;

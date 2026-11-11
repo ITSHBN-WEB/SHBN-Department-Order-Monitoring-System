@@ -25,14 +25,15 @@ export default async function handler(req, res) {
     // received = viewed cycle, receivedCurrent = the cycle entries are going into right now
     const categories = await sql`
       select c.id, c.department, c.name,
-             c.limit_value::float8 as "limit",
+             coalesce(al.limit_value, c.limit_value)::float8 as "limit",
              coalesce(sum(e.value) filter (where e.cycle_no = ${view}::int), 0)::float8 as received,
              coalesce(sum(e.value) filter (where e.cycle_no = ${current}::int), 0)::float8 as "receivedCurrent",
              (count(e.id) filter (where e.cycle_no = ${view}::int))::int as entries
       from categories c
+      left join account_limits al on al.category_id = c.id and al.account = ${acct}::text
       left join entries e
         on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int) and e.account = ${acct}::text
-      group by c.id
+      group by c.id, al.limit_value
       order by c.sort_order, c.id`;
 
     // Entries are an append-only ledger ordered by id, so "running" is the category total
@@ -43,8 +44,9 @@ export default async function handler(req, res) {
                e.value::float8 as value, e.submitted_by as "submittedBy", e.cycle_no as cycle,
                (extract(epoch from e.created_at) * 1000)::float8 as ts,
                (sum(e.value) over (partition by e.category_id, e.cycle_no order by e.id))::float8 as running,
-               c.limit_value::float8 as "limit"
+               coalesce(al.limit_value, c.limit_value)::float8 as "limit"
         from entries e join categories c on c.id = e.category_id
+        left join account_limits al on al.category_id = e.category_id and al.account = e.account
         where e.account = ${acct}::text
       ) t
       order by id desc
