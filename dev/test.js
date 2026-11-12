@@ -27,7 +27,8 @@ const call = (handler, { method = 'GET', query = {}, body, as = '1008-SHBN', coo
 await sql`update settings set value = ${hashPassword('test-admin')} where key = 'admin_hash'`;
 await sql`update settings set value = ${hashPassword('test-hq')} where key = 'hq_hash'`;
 
-const iso = (offsetDays) => new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
+// Malaysia date (UTC+8) to match the app's own clock; plain UTC differs between 00:00 and 08:00 KL.
+const iso = (offsetDays) => new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10);
 const setStart = (d) => sql`update settings set value = ${d} where key = 'tracking_start'`;
 const catId = async (name) => (await sql`select id from categories where name = ${name}`)[0].id;
 
