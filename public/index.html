@@ -64,7 +64,19 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
 .top-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .acctsel { background: var(--surface); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 13px; height: 38px; max-width: 100%; }
 .acctsel:focus-visible { outline: 2px solid var(--accent, #2dd4bf); outline-offset: 1px; }
-.is-central #entry, .is-central .jump { display: none; }
+.is-central #entry, .is-central #recentSec, .is-central .jump { display: none; }
+#filters { display: none; }
+.is-central #filters { display: block; }
+.fgroup { margin-top: 18px; }
+.fgroup h4 { display: flex; justify-content: space-between; align-items: center; margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.fgroup h4 .linkbtn { font-size: 12px; text-transform: none; letter-spacing: 0; }
+.flist { max-height: 300px; overflow: auto; }
+.fopt { display: flex; align-items: center; gap: 9px; padding: 6px 6px; font-size: 13px; border-radius: 7px; cursor: pointer; user-select: none; }
+.fopt:hover { background: var(--surface-2); }
+.fopt input { width: 16px; height: 16px; accent-color: #2dd4bf; flex: none; margin: 0; }
+.fopt small { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.fsub { font-size: 11px; color: var(--muted); padding: 8px 6px 2px; letter-spacing: .05em; text-transform: uppercase; }
+.fclear { margin-top: 16px; width: 100%; }
 .is-central .row { cursor: default; }
 .pill.acc { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 .pager { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
@@ -399,7 +411,13 @@ select.field { appearance: auto; }
         </form>
       </section>
 
-      <section>
+      <section id="filters" aria-label="Filters">
+        <h3>Filters</h3>
+        <div class="hint">Tick several departments or categories to compare them</div>
+        <div id="fBody"></div>
+      </section>
+
+      <section id="recentSec">
         <h3>Recent Activity</h3>
         <div class="hint" id="actHint">Latest 15 entries across all categories</div>
         <ul class="activity" id="activity"></ul>
@@ -456,7 +474,7 @@ select.field { appearance: auto; }
   document.querySelectorAll('[data-dlogo]').forEach((el) => { el.innerHTML = dLogoHtml(); });
 
   let view = 'dashboard';
-  const state = { auth: null, data: null, view: null, selected: null, active: -1, filtered: [] };
+  const state = { auth: null, data: null, view: null, selected: null, active: -1, filtered: [], fDept: new Set(), fCat: new Set(), fSig: '' };
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
@@ -513,7 +531,7 @@ select.field { appearance: auto; }
   /* ---------------- render dashboard ---------------- */
   function render() {
     const d = state.data;
-    const cats = d.categories;
+    const cats = d.central ? applyFilters(d.categories) : d.categories;
     const cy = d.cycle;
     const totLimit = cats.reduce((a, c) => a + c.limit, 0);
     const totRecv = cats.reduce((a, c) => a + c.received, 0);
@@ -565,7 +583,6 @@ select.field { appearance: auto; }
       <div class="top">
         <div><h1>Dashboard</h1><div class="sub">${d.central ? (d.viewAccount === 'ALL' ? 'All accounts combined · limit vs stock value received' : esc(d.viewAccount) + ' · limit vs stock value received') : 'Limit vs stock value received, per category'}</div></div>
         <div class="top-tools">
-        ${d.central ? `<select class="acctsel" id="acctSel" aria-label="Account">${['ALL', ...d.branches].map((a) => `<option value="${esc(a)}"${a === d.viewAccount ? ' selected' : ''}>${a === 'ALL' ? 'All accounts' : esc(a)}</option>`).join('')}</select>` : ''}
         <div class="pager" role="group" aria-label="Cycle navigation">
           <button type="button" id="prev" aria-label="Previous cycle" ${prevView === null ? 'disabled' : ''}>${icons.prev}</button>
           <span>${cycleName(state.view)}</span>
@@ -589,7 +606,7 @@ select.field { appearance: auto; }
       </div>
       ${deptHtml}`;
 
-    if (d.central) $('acctSel').onchange = (e) => { state.acct = e.target.value; load(state.view); };
+    if (d.central) renderFilters();
     $('prev').onclick = () => load(prevView);
     $('next').onclick = () => load(nextView);
     $('main').querySelectorAll('.row').forEach((b) => b.addEventListener('click', () => {
@@ -605,6 +622,54 @@ select.field { appearance: auto; }
     renderEntryContext();
     if (state.selected) { const fresh = state.data.categories.find((c) => c.id === state.selected.id); if (fresh) state.selected = fresh; renderCatInfo(); }
   }
+  /* ---------------- Central Admin filters ---------------- */
+  function applyFilters(all) {
+    return all.filter((c) => (!state.fDept.size || state.fDept.has(c.department)) && (!state.fCat.size || state.fCat.has(c.id)));
+  }
+  function renderFilters() {
+    const d = state.data, all = d.categories;
+    const depts = [...new Set(all.map((c) => c.department))];
+    const catsShown = all.filter((c) => !state.fDept.size || state.fDept.has(c.department));
+    const sig = JSON.stringify([d.viewAccount, d.branches, [...state.fDept], [...state.fCat], all.length]);
+    if (sig === state.fSig) return;                       // nothing changed (e.g. the 30s refresh): leave the panel alone
+    state.fSig = sig;
+    const body = $('fBody'), keep = body.querySelector('.flist.cats'), top = keep ? keep.scrollTop : 0;
+    const ae = document.activeElement && body.contains(document.activeElement) ? document.activeElement : null;
+    const aeSel = ae ? (ae.dataset.d !== undefined ? `[data-d="${CSS.escape(ae.dataset.d)}"]` : ae.dataset.c !== undefined ? `[data-c="${ae.dataset.c}"]` : null) : null;
+    const accOpts = ['ALL', ...d.branches].map((a) => `<label class="fopt"><input type="radio" name="facc" value="${esc(a)}" ${a === d.viewAccount ? 'checked' : ''}>${a === 'ALL' ? 'All accounts' : esc(a)}</label>`).join('');
+    const deptOpts = depts.map((x) => `<label class="fopt"><input type="checkbox" data-d="${esc(x)}" ${state.fDept.has(x) ? 'checked' : ''}>${esc(x)}<small>${all.filter((c) => c.department === x).length}</small></label>`).join('');
+    let catOpts = '', last = null;
+    for (const c of catsShown) {
+      if (c.department !== last) { catOpts += `<div class="fsub">${esc(c.department)}</div>`; last = c.department; }
+      catOpts += `<label class="fopt"><input type="checkbox" data-c="${c.id}" ${state.fCat.has(c.id) ? 'checked' : ''}>${esc(c.name)}</label>`;
+    }
+    const any = state.fDept.size || state.fCat.size;
+    body.innerHTML = `
+      <div class="fgroup"><h4>Account</h4>${accOpts}</div>
+      <div class="fgroup"><h4>Department${state.fDept.size ? ` · ${state.fDept.size}` : ''}<button type="button" class="linkbtn" data-clear="d" ${state.fDept.size ? '' : 'hidden'}>Clear</button></h4><div class="flist">${deptOpts}</div></div>
+      <div class="fgroup"><h4>Category${state.fCat.size ? ` · ${state.fCat.size}` : ''}<button type="button" class="linkbtn" data-clear="c" ${state.fCat.size ? '' : 'hidden'}>Clear</button></h4><div class="flist cats">${catOpts}</div></div>
+      <button type="button" class="linkbtn fclear" data-clear="all" ${any ? '' : 'hidden'}>Clear department &amp; category filters</button>`;
+    const nl = body.querySelector('.flist.cats'); if (nl) nl.scrollTop = top;
+    if (aeSel) { const f = body.querySelector(aeSel); if (f) f.focus(); }
+  }
+  $('fBody').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.name === 'facc') { state.acct = t.value; load(state.view); return; }
+    if (t.dataset.d !== undefined) {
+      t.checked ? state.fDept.add(t.dataset.d) : state.fDept.delete(t.dataset.d);
+      const ok = new Set(state.data.categories.filter((c) => !state.fDept.size || state.fDept.has(c.department)).map((c) => c.id));
+      state.fCat = new Set([...state.fCat].filter((id) => ok.has(id)));   // drop ticked categories that are no longer in view
+    } else if (t.dataset.c !== undefined) {
+      const id = Number(t.dataset.c); t.checked ? state.fCat.add(id) : state.fCat.delete(id);
+    } else return;
+    render();
+  });
+  $('fBody').addEventListener('click', (e) => {
+    const k = e.target.closest('[data-clear]'); if (!k) return;
+    if (k.dataset.clear !== 'c') state.fDept.clear();
+    if (k.dataset.clear !== 'd') state.fCat.clear();
+    render();
+  });
   function renderActivity() {
     const rows = state.data.recent;
     $('activity').innerHTML = rows.length ? rows.map((r) => `
@@ -1068,6 +1133,7 @@ select.field { appearance: auto; }
   function showApp(account) {
     state.auth = account;
     state.central = !!account.central; state.acct = 'ALL';
+    state.fDept.clear(); state.fCat.clear(); state.fSig = ''; $('fBody').innerHTML = '';
     app.classList.toggle('is-central', state.central);
     $('actHint').textContent = state.central ? 'Latest 15 entries across all accounts' : 'Latest 15 entries across all categories';
     loginWrap.hidden = true; app.hidden = false;
