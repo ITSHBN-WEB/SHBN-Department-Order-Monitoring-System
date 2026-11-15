@@ -77,6 +77,15 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
 .fopt small { margin-left: auto; color: var(--muted); font-size: 11.5px; }
 .fsub { font-size: 11px; color: var(--muted); padding: 8px 6px 2px; letter-spacing: .05em; text-transform: uppercase; }
 .fclear { margin-top: 16px; width: 100%; }
+.kpis.k3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mcat { border-bottom: 1px solid var(--line-soft); padding: 8px 0 6px; }
+.rows li.mcat:last-child { border-bottom: 0; }
+.mhead { padding: 4px 18px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.row.arow { border-bottom: 0; padding: 5px 18px 5px 34px; cursor: default; }
+.row.arow .name { font-weight: 400; color: var(--muted); font-size: 13px; }
+.dept-head .arow { grid-column: 1 / -1; padding: 4px 0 4px 16px; }
+.dept-head .arow .bar { grid-column: auto; }
+@media (max-width: 760px) { .kpis.k3 { grid-template-columns: 1fr; } .row.arow { padding-left: 18px; } }
 .is-central .row { cursor: default; }
 .pill.acc { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 .pager { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
@@ -541,6 +550,8 @@ select.field { appearance: auto; }
     const maxLive = Math.max(d.phase === 'live' ? d.currentCycle : 0, 1);
     const prevView = state.view > 1 ? state.view - 1 : state.view === 1 && d.testPeriod ? 0 : null;
     const nextView = state.view === 0 ? 1 : state.view < maxLive ? state.view + 1 : null;
+    const multi = d.central && d.viewAccount === 'ALL';     // Central Admin, all accounts: show each account side by side, never added together
+    const accOf = (c, code) => c.accounts.find((x) => x.account === code) || { limit: 0, received: 0 };
     const timePct = cy.status === 'closed' ? 100 : cy.status === 'active' ? (cy.dayNumber / cy.days) * 100 : 0;
 
     let banner = '';
@@ -559,7 +570,15 @@ select.field { appearance: auto; }
       g.items.push(c);
     }
 
+    const arowHtml = (label, r, l) => `<div class="row arow"><span class="name">${esc(label)}</span>${barHtml(r, l)}<span class="amt num"><b>${money(r)}</b> <span>/ ${money(l)}</span></span><span class="st">${pillHtml(r, l)}</span></div>`;
     const deptHtml = groups.map((g) => {
+      if (multi) {
+        const sums = d.branches.map((a) => ({ a, l: g.items.reduce((x, c) => x + accOf(c, a).limit, 0), r: g.items.reduce((x, c) => x + accOf(c, a).received, 0) }));
+        return `<section class="card dept" aria-label="${esc(g.name)}">
+          <div class="dept-head"><h2>${esc(g.name)}</h2><div></div>${sums.map((x) => arowHtml(x.a, x.r, x.l)).join('')}</div>
+          <ul class="rows">${g.items.map((c) => `<li class="mcat"><div class="mhead">${esc(c.name)}</div>${d.branches.map((a) => { const x = accOf(c, a); return arowHtml(a, x.received, x.limit); }).join('')}</li>`).join('')}</ul>
+        </section>`;
+      }
       const l = g.items.reduce((a, c) => a + c.limit, 0);
       const r = g.items.reduce((a, c) => a + c.received, 0);
       return `<section class="card dept" aria-label="${esc(g.name)}">
@@ -598,12 +617,16 @@ select.field { appearance: auto; }
         </div>
         <div class="timebar" aria-hidden="true"><i style="width:${timePct}%"></i></div>
       </div>
-      <div class="kpis">
+      ${multi ? `<div class="kpis k3">${d.branches.map((a) => {
+        const l = cats.reduce((x, c) => x + accOf(c, a).limit, 0), r = cats.reduce((x, c) => x + accOf(c, a).received, 0);
+        const ov = cats.filter((c) => accOf(c, a).received > accOf(c, a).limit).length;
+        return `<div class="card kpi ${ov ? 'bad' : ''}"><small>${esc(a)}</small><strong class="num">${money(r)}</strong><em>of ${money(l)} · ${pctText(pctOf(r, l))} · ${ov} over limit</em></div>`;
+      }).join('')}</div>` : `<div class="kpis">
         <div class="card kpi"><small>Total limit</small><strong class="num">${money(totLimit)}</strong><em>${cats.length} categories</em></div>
         <div class="card kpi"><small>Stock value received</small><strong class="num">${money(totRecv)}</strong><em>${pctText(pctOf(totRecv, totLimit))} of total limit</em></div>
         <div class="card kpi ${remaining < 0 ? 'bad' : ''}"><small>${remaining < 0 ? 'Over total limit' : 'Remaining'}</small><strong class="num">${money(Math.abs(remaining))}</strong><em>${cy.status === 'active' ? `${pctText(timePct)} of cycle elapsed` : '&nbsp;'}</em></div>
         <div class="card kpi ${over.length ? 'bad' : ''}"><small>Alerts</small><strong class="num">${over.length} over</strong><em>${near.length} near limit (80%+)</em></div>
-      </div>
+      </div>`}
       ${deptHtml}`;
 
     if (d.central) renderFilters();

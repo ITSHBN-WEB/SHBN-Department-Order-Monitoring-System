@@ -369,11 +369,17 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) own[code] = await riceOf(code);
   r = await call(dashboard, { as: CA });
   assert.equal(r.code, 200);
-  assert.deepEqual([r.body.central, r.body.viewAccount, r.body.branches], [true, 'ALL', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);
+  assert.deepEqual([r.body.central, r.body.viewAccount, r.body.branches], [true, 'ALL', ['1008-SHBN', '1007-SHPP', '1015-SHPL']]);   // shown in this order
   const rice = r.body.categories.find((c) => c.name === 'RICE');
   assert.equal(rice.received, Object.values(own).reduce((a, x) => a + x.received, 0));            // totals of all three accounts
   assert.equal(rice.limit, ['1008-SHBN', '1015-SHPL', '1007-SHPP'].reduce((a, c) => a + riceLimit(c), 0));   // limits add up too
   assert.equal(r.body.categories.length, 31);
+  // side by side: every category carries each account's OWN limit and total, in order
+  assert.deepEqual(rice.accounts.map((x) => x.account), ['1008-SHBN', '1007-SHPP', '1015-SHPL']);
+  for (const x of rice.accounts) assert.deepEqual([x.limit, x.received], [riceLimit(x.account), own[x.account].received]);
+  assert.ok(r.body.categories.every((c) => c.accounts.length === 3));
+  assert.equal((await call(dashboard, { as: CA, query: { account: '1015-SHPL' } })).body.categories[0].accounts, undefined);   // single-account view has no breakdown
+  assert.equal((await call(dashboard, { as: '1008-SHBN' })).body.categories[0].accounts, undefined);
   assert.deepEqual([...new Set(r.body.recent.map((x) => x.account))].sort(), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
   for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) {                                   // one account at a time matches that account's own dashboard
     const one = await call(dashboard, { as: CA, query: { account: code } });

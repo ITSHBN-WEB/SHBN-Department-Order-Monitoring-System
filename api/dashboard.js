@@ -13,7 +13,9 @@ export default async function handler(req, res) {
     if (!acct) return;
     // Branch accounts see only their own data. Central Admin sees all branch accounts combined, or one chosen account.
     const central = isCentral(acct);
-    const branches = central ? (await sql`select code from accounts where code <> ${CENTRAL} order by code`).map((r) => r.code) : [acct];
+    const order = ['1008-SHBN', '1007-SHPP', '1015-SHPL'];     // show accounts in the same order everywhere
+    const rank = (c) => (order.includes(c) ? order.indexOf(c) : 99);
+    const branches = central ? (await sql`select code from accounts where code <> ${CENTRAL}`).map((r) => r.code).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)) : [acct];
     const wanted = String(req.query?.account ?? '').toUpperCase();
     const viewAccount = central && branches.includes(wanted) ? wanted : central ? 'ALL' : acct;
     const accts = central && viewAccount !== 'ALL' ? [viewAccount] : branches;
@@ -42,6 +44,26 @@ export default async function handler(req, res) {
         on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int) and e.account = any(${accts}::text[])
       group by c.id
       order by c.sort_order, c.id`;
+
+    // Combined view for Central Admin: keep each account's own limit and total side by side (never added together).
+    if (central && viewAccount === 'ALL') {
+      const per = await sql`
+        select c.id as category_id, a.code as account,
+               coalesce(al.limit_value, c.limit_value)::float8 as "limit",
+               coalesce(sum(e.value) filter (where e.cycle_no = ${view}::int), 0)::float8 as received
+        from categories c
+        cross join unnest(${accts}::text[]) as a(code)
+        left join account_limits al on al.category_id = c.id and al.account = a.code
+        left join entries e on e.category_id = c.id and e.account = a.code
+        group by c.id, a.code, al.limit_value`;
+      const byCat = new Map();
+      for (const r of per) {
+        const k = Number(r.category_id);
+        if (!byCat.has(k)) byCat.set(k, []);
+        byCat.get(k).push({ account: r.account, limit: r.limit, received: r.received });
+      }
+      for (const c of categories) c.accounts = (byCat.get(Number(c.id)) || []).sort((x, y) => rank(x.account) - rank(y.account));
+    }
 
     // Entries are an append-only ledger ordered by id, so "running" is the category total
     // immediately after that entry — the same answer no matter how requests interleaved.
