@@ -24,7 +24,8 @@ create table if not exists accounts (
 insert into accounts (code, password_hash) values
   ('1008-SHBN', 'scrypt$ia2gX+KUSB3nW1jC8aef+w==$PKGBjpoL3ejiiArnmeyw9QEWyRPpZpHe6dOlV2ORhFU='),
   ('1015-SHPL', 'scrypt$vXeP8idFovCslQTG6+nFig==$XSjpgYxxyfSYxkKSmLBKYqfugwmFRuNbBvGNvk/a5vY='),
-  ('1007-SHPP', 'scrypt$m7zUpXYQbgzUqS7/tVwqUQ==$VsCbLcRb3fpqqzQXRNRv8kJtZOEIlpgQlqrx8xdStH8=')
+  ('1007-SHPP', 'scrypt$m7zUpXYQbgzUqS7/tVwqUQ==$VsCbLcRb3fpqqzQXRNRv8kJtZOEIlpgQlqrx8xdStH8='),
+  ('CENTRAL-ADMIN', 'scrypt$HJrQet05RU1m/AT9vBImxA==$ICxSzxIQ2nLRNesdvTxfnkvgRemXMqbSRz5lCsGgCeg=')
 on conflict (code) do nothing;
 
 create table if not exists entries (

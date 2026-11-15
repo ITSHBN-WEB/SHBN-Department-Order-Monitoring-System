@@ -1,5 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { requireAccount, adminScope } from '../lib/auth.js';
+import { requireAccount, adminScope, isCentral, CENTRAL } from '../lib/auth.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 /**
@@ -31,7 +31,8 @@ export default async function handler(req, res) {
     const acct = await requireAccount(req, res, sql);
     if (!acct) return;
 
-    const scope = await adminScope(sql, body.password);
+    let scope = await adminScope(sql, body.password);
+    if (isCentral(acct) && scope !== 'hq') scope = null;   // Central Admin owns no entries: only the head-office password applies
     if (!scope) {
       await sleep(400); // slows down password guessing
       return res.status(401).json({ error: 'Incorrect password.', code: 'password' });
@@ -63,7 +64,7 @@ export default async function handler(req, res) {
         }
         const categories = await sql`select id, department, name from categories order by sort_order, id`;
         const defaultCycle = phase === 'upcoming' ? (cycles[0]?.n ?? 1) : current;
-        const accounts = hq ? (await sql`select code from accounts order by code`).map((r) => r.code) : [acct];
+        const accounts = hq ? (await sql`select code from accounts where code <> ${CENTRAL} order by code`).map((r) => r.code) : [acct];
         return res.status(200).json({ scope, account: acct, accounts, cycles, categories, defaultCycle });
       }
 

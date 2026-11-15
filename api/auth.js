@@ -1,5 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { verifyPassword, dummyHash, signSession, readSession, sessionCookie } from '../lib/auth.js';
+import { verifyPassword, dummyHash, signSession, readSession, sessionCookie, isCentral } from '../lib/auth.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
       const s = readSession(req);
       const found = s ? await sql`select code from accounts where code = ${s.code}` : [];
       if (!found.length) return res.status(401).json({ error: 'Please sign in.', code: 'session' });
-      return res.status(200).json({ account: { code: found[0].code } });
+      return res.status(200).json({ account: { code: found[0].code, central: isCentral(found[0].code) } });
     }
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Incorrect account or password.', code: 'login' });
     }
     res.setHeader('Set-Cookie', sessionCookie(req, signSession(rows[0].code)));
-    return res.status(200).json({ ok: true, account: { code: rows[0].code } });
+    return res.status(200).json({ ok: true, account: { code: rows[0].code, central: isCentral(rows[0].code) } });
   } catch (err) {
     console.error('auth error', err);
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });

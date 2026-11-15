@@ -1,5 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { requireAccount } from '../lib/auth.js';
+import { requireAccount, isCentral, CENTRAL } from '../lib/auth.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 export default async function handler(req, res) {
@@ -11,6 +11,12 @@ export default async function handler(req, res) {
     await ensureSchema(sql);
     const acct = await requireAccount(req, res, sql);
     if (!acct) return;
+    // Branch accounts see only their own data. Central Admin sees all branch accounts combined, or one chosen account.
+    const central = isCentral(acct);
+    const branches = central ? (await sql`select code from accounts where code <> ${CENTRAL} order by code`).map((r) => r.code) : [acct];
+    const wanted = String(req.query?.account ?? '').toUpperCase();
+    const viewAccount = central && branches.includes(wanted) ? wanted : central ? 'ALL' : acct;
+    const accts = central && viewAccount !== 'ALL' ? [viewAccount] : branches;
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { phase, started, current, opensOn, daysUntilStart } = currentCycle(settings, today);
@@ -25,35 +31,39 @@ export default async function handler(req, res) {
     // received = viewed cycle, receivedCurrent = the cycle entries are going into right now
     const categories = await sql`
       select c.id, c.department, c.name,
-             coalesce(al.limit_value, c.limit_value)::float8 as "limit",
+             (select coalesce(sum(coalesce(al.limit_value, c.limit_value)), 0)
+                from unnest(${accts}::text[]) as a(code)
+                left join account_limits al on al.category_id = c.id and al.account = a.code)::float8 as "limit",
              coalesce(sum(e.value) filter (where e.cycle_no = ${view}::int), 0)::float8 as received,
              coalesce(sum(e.value) filter (where e.cycle_no = ${current}::int), 0)::float8 as "receivedCurrent",
              (count(e.id) filter (where e.cycle_no = ${view}::int))::int as entries
       from categories c
-      left join account_limits al on al.category_id = c.id and al.account = ${acct}::text
       left join entries e
-        on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int) and e.account = ${acct}::text
-      group by c.id, al.limit_value
+        on e.category_id = c.id and e.cycle_no in (${view}::int, ${current}::int) and e.account = any(${accts}::text[])
+      group by c.id
       order by c.sort_order, c.id`;
 
     // Entries are an append-only ledger ordered by id, so "running" is the category total
     // immediately after that entry — the same answer no matter how requests interleaved.
     const recent = await sql`
       select * from (
-        select e.id, c.name as category, c.department,
+        select e.id, e.account, c.name as category, c.department,
                e.value::float8 as value, e.submitted_by as "submittedBy", e.cycle_no as cycle,
                (extract(epoch from e.created_at) * 1000)::float8 as ts,
-               (sum(e.value) over (partition by e.category_id, e.cycle_no order by e.id))::float8 as running,
+               (sum(e.value) over (partition by e.account, e.category_id, e.cycle_no order by e.id))::float8 as running,
                coalesce(al.limit_value, c.limit_value)::float8 as "limit"
         from entries e join categories c on c.id = e.category_id
         left join account_limits al on al.category_id = e.category_id and al.account = e.account
-        where e.account = ${acct}::text
+        where e.account = any(${accts}::text[])
       ) t
       order by id desc
       limit 15`;
 
     return res.status(200).json({
       account: acct,
+      central,
+      viewAccount,
+      branches: central ? branches : undefined,
       today,
       phase,
       started,

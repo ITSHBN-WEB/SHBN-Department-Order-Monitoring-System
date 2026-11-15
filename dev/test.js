@@ -239,7 +239,7 @@ assert.equal(r.body.entries.find((e) => e.id === e1.id).value, 250.46);
 // --- Accounts: sign-in ----------------------------------------------------------------------
 const { default: auth } = await import('../api/auth.js');
 const seeded = await sql`select code, password_hash from accounts order by code`;
-assert.deepEqual(seeded.map((a) => a.code), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
+assert.deepEqual(seeded.map((a) => a.code), ['1007-SHPP', '1008-SHBN', '1015-SHPL', 'CENTRAL-ADMIN']);
 assert.ok(seeded.every((a) => /^scrypt\$/.test(a.password_hash)));           // hashes only, never plain text
 await sql`update accounts set password_hash = ${hashPassword('pw-bn')} where code = '1008-SHBN'`;
 await sql`update accounts set password_hash = ${hashPassword('pw-pl')} where code = '1015-SHPL'`;
@@ -251,7 +251,7 @@ assert.equal((await login('9999-NONE', 'pw-bn')).code, 401);
 assert.equal((await login('1008-SHBN', '')).code, 401);
 assert.equal((await login('1015-SHPL', 'pw-bn')).code, 401);                  // another account's password
 r = await call(auth, { as: null, query: { accounts: '1' } });                    // sign-in dropdown list (public)
-assert.deepEqual(r.body, { accounts: ['1007-SHPP', '1008-SHBN', '1015-SHPL'] });
+assert.deepEqual(r.body, { accounts: ['1007-SHPP', '1008-SHBN', '1015-SHPL', 'CENTRAL-ADMIN'] });
 r = await login(' 1015-shpl ', 'pw-pl');                                       // trimmed + case-insensitive
 assert.equal(r.code, 200);
 assert.equal(r.body.account.code, '1015-SHPL');
@@ -352,6 +352,48 @@ assert.equal((await riceOf('1008-SHBN')).received, 4321 + 1 + 5);
 // the two admin passwords are not interchangeable with account passwords
 assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { password: 'pw-bn', action: 'login' } })).code, 401);
 
+// --- Central Admin: view-only account that sees every branch account -------------------------------------
+{
+  const CA = 'CENTRAL-ADMIN';
+  r = await call(auth, { method: 'POST', as: null, body: { action: 'login', username: 'central-admin', password: '123456ADMIN' } });   // the real seeded password
+  assert.deepEqual([r.code, r.body.account.code, r.body.account.central], [200, CA, true]);
+  r = await call(auth, { method: 'POST', as: null, body: { action: 'login', username: CA, password: '123456' } });
+  assert.equal(r.code, 401);
+  r = await call(auth, { method: 'POST', as: null, body: { action: 'login', username: '1008-SHBN', password: 'pw-bn' } });
+  assert.equal(r.body.account.central, false);
+  assert.ok((await call(auth, { query: { accounts: '1' }, as: null })).body.accounts.includes(CA));    // appears in the sign-in dropdown
+
+  // each branch submits into RICE, so the combined view has something from every account
+  for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) assert.equal((await asAcct(code, { value: 1000 })).code, 201);
+  const own = {};
+  for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) own[code] = await riceOf(code);
+  r = await call(dashboard, { as: CA });
+  assert.equal(r.code, 200);
+  assert.deepEqual([r.body.central, r.body.viewAccount, r.body.branches], [true, 'ALL', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);
+  const rice = r.body.categories.find((c) => c.name === 'RICE');
+  assert.equal(rice.received, Object.values(own).reduce((a, x) => a + x.received, 0));            // totals of all three accounts
+  assert.equal(rice.limit, ['1008-SHBN', '1015-SHPL', '1007-SHPP'].reduce((a, c) => a + riceLimit(c), 0));   // limits add up too
+  assert.equal(r.body.categories.length, 31);
+  assert.deepEqual([...new Set(r.body.recent.map((x) => x.account))].sort(), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
+  for (const code of ['1008-SHBN', '1015-SHPL', '1007-SHPP']) {                                   // one account at a time matches that account's own dashboard
+    const one = await call(dashboard, { as: CA, query: { account: code } });
+    const mine = await call(dashboard, { as: code });
+    assert.equal(one.body.viewAccount, code);
+    assert.deepEqual(one.body.categories, mine.body.categories);
+    assert.ok(one.body.recent.length > 0 && one.body.recent.every((x) => x.account === code));
+  }
+  assert.equal((await call(dashboard, { as: CA, query: { account: 'NOPE' } })).body.viewAccount, 'ALL');
+  assert.equal((await call(dashboard, { as: '1015-SHPL', query: { account: '1008-SHBN' } })).body.recent.every((x) => x.account === '1015-SHPL'), true);   // branches can't borrow the filter
+
+  // view-only: cannot submit
+  r = await asAcct(CA, { value: 5 });
+  assert.equal(r.code, 403);
+  // admin tab: only the head-office password works for it, and it covers every account
+  assert.equal((await call(admin, { method: 'POST', as: CA, body: { password: 'test-admin', action: 'login' } })).code, 401);
+  r = await call(admin, { method: 'POST', as: CA, body: { password: 'test-hq', action: 'meta' } });
+  assert.deepEqual([r.body.scope, r.body.accounts], ['hq', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);   // Central Admin itself is not listed as a store
+}
+
 // --- Upgrading an existing (pre-accounts) database keeps its entries and gives them to 1008-SHBN ---------------
 {
   const { PGlite } = await import('@electric-sql/pglite');
@@ -367,7 +409,7 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   await ensureSchema(oldSql, true);
   const rows = await oldSql`select submitted_by, account from entries order by id`;
   assert.deepEqual(rows.map((x) => x.account), ['1008-SHBN', '1008-SHBN']);
-  assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 3);
+  assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 4);
   assert.equal((await oldSql`select count(*)::int n from settings where key in ('admin_hash', 'hq_hash')`)[0].n, 2);
   const lim = await oldSql`select account, limit_value::float8 v from account_limits order by account`;           // RICE got one row per account
   assert.deepEqual(lim.map((x) => x.account), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
@@ -378,7 +420,7 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   await assert.rejects(() => old.query(`insert into entries (category_id, value, submitted_by, entry_date, cycle_no) values (1, 1, 'X', '2026-11-10', 1)`)); // account is now required
   await ensureSchema(oldSql, true);               // running it again changes nothing
   assert.equal((await oldSql`select count(*)::int n from entries`)[0].n, 2);
-  assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 3);
+  assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 4);
 }
 
 console.log('All DOMS tests passed');

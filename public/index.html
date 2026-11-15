@@ -61,6 +61,12 @@ button, input { font: inherit; color: inherit; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
 h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
 .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.top-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.acctsel { background: var(--surface); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 13px; height: 38px; max-width: 100%; }
+.acctsel:focus-visible { outline: 2px solid var(--accent, #2dd4bf); outline-offset: 1px; }
+.is-central #entry, .is-central .jump { display: none; }
+.is-central .row { cursor: default; }
+.pill.acc { background: transparent; color: var(--muted); border: 1px solid var(--line); }
 .pager { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
 .pager button { width: 30px; height: 30px; border: 0; background: none; border-radius: 7px; cursor: pointer; display: grid; place-items: center; color: var(--muted); }
 .pager button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
@@ -395,7 +401,7 @@ select.field { appearance: auto; }
 
       <section>
         <h3>Recent Activity</h3>
-        <div class="hint">Latest 15 entries across all categories</div>
+        <div class="hint" id="actHint">Latest 15 entries across all categories</div>
         <ul class="activity" id="activity"></ul>
       </section>
     </div>
@@ -488,10 +494,14 @@ select.field { appearance: auto; }
   /* ---------------- data ---------------- */
   async function load(cycle) {
     try {
-      const r = await fetch('/api/dashboard' + (cycle != null ? `?cycle=${cycle}` : ''), { cache: 'no-store' });
+      const qs = [];
+      if (cycle != null) qs.push('cycle=' + cycle);
+      if (state.central && state.acct && state.acct !== 'ALL') qs.push('account=' + encodeURIComponent(state.acct));
+      const r = await fetch('/api/dashboard' + (qs.length ? '?' + qs.join('&') : ''), { cache: 'no-store' });
       if (r.status === 401) { showLogin('Your session has expired. Please sign in again.'); return; }
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Request failed');
       state.data = await r.json();
+      if (state.central) state.acct = state.data.viewAccount;
       state.view = state.data.cycle.n;
       render();
     } catch (e) {
@@ -541,7 +551,7 @@ select.field { appearance: auto; }
           ${barHtml(r, l)}
         </div>
         <ul class="rows">${g.items.map((c) => `
-          <li><button type="button" class="row" data-id="${c.id}" title="Add an entry for ${esc(c.name)}">
+          <li><button type="button" class="row" data-id="${c.id}" ${d.central ? '' : `title="Add an entry for ${esc(c.name)}"`}>
             <span class="name">${esc(c.name)}</span>
             ${barHtml(c.received, c.limit)}
             <span class="amt num"><b>${money(c.received)}</b> <span>/ ${money(c.limit)}</span></span>
@@ -553,11 +563,14 @@ select.field { appearance: auto; }
 
     $('main').innerHTML = `
       <div class="top">
-        <div><h1>Dashboard</h1><div class="sub">Limit vs stock value received, per category</div></div>
+        <div><h1>Dashboard</h1><div class="sub">${d.central ? (d.viewAccount === 'ALL' ? 'All accounts combined · limit vs stock value received' : esc(d.viewAccount) + ' · limit vs stock value received') : 'Limit vs stock value received, per category'}</div></div>
+        <div class="top-tools">
+        ${d.central ? `<select class="acctsel" id="acctSel" aria-label="Account">${['ALL', ...d.branches].map((a) => `<option value="${esc(a)}"${a === d.viewAccount ? ' selected' : ''}>${a === 'ALL' ? 'All accounts' : esc(a)}</option>`).join('')}</select>` : ''}
         <div class="pager" role="group" aria-label="Cycle navigation">
           <button type="button" id="prev" aria-label="Previous cycle" ${prevView === null ? 'disabled' : ''}>${icons.prev}</button>
           <span>${cycleName(state.view)}</span>
           <button type="button" id="next" aria-label="Next cycle" ${nextView === null ? 'disabled' : ''}>${icons.next}</button>
+        </div>
         </div>
       </div>
       ${banner}
@@ -576,11 +589,12 @@ select.field { appearance: auto; }
       </div>
       ${deptHtml}`;
 
+    if (d.central) $('acctSel').onchange = (e) => { state.acct = e.target.value; load(state.view); };
     $('prev').onclick = () => load(prevView);
     $('next').onclick = () => load(nextView);
     $('main').querySelectorAll('.row').forEach((b) => b.addEventListener('click', () => {
       const c = state.data.categories.find((x) => x.id === Number(b.dataset.id));
-      if (c) { selectCategory(c); $('value').focus(); }
+      if (c && !state.central) { selectCategory(c); $('value').focus(); }
     }));
 
     $('sideFoot').innerHTML = d.currentInfo
@@ -597,13 +611,14 @@ select.field { appearance: auto; }
       <li>
         <span class="t">${esc(r.category)}</span>
         <span class="v num">${money(r.value)}</span>
-        <span class="m"><span>${esc(r.department)}</span><span>·</span><span>${esc(r.submittedBy)}</span><span>·</span><span class="num">${when(r.ts)}</span>
+        <span class="m">${state.central ? `<span class="pill acc">${esc(r.account)}</span>` : ''}<span>${esc(r.department)}</span><span>·</span><span>${esc(r.submittedBy)}</span><span>·</span><span class="num">${when(r.ts)}</span>
           ${r.cycle === 0 ? '<span class="pill idle">Test</span>' : ''}${r.overLimit ? `<span class="pill over">${icons.warn}Over limit</span>` : ''}</span>
       </li>`).join('') : '<li class="empty" style="display:block">No entries yet. Submit the first one above.</li>';
   }
 
   function renderEntryContext() {
     const d = state.data;
+    if (state.central) return;
     const btn = $('submit');
     if (!d.started) {
       $('entryHint').textContent = `Opens ${dmy(d.opensOn)}`;
@@ -1052,6 +1067,9 @@ select.field { appearance: auto; }
   }
   function showApp(account) {
     state.auth = account;
+    state.central = !!account.central; state.acct = 'ALL';
+    app.classList.toggle('is-central', state.central);
+    $('actHint').textContent = state.central ? 'Latest 15 entries across all accounts' : 'Latest 15 entries across all categories';
     loginWrap.hidden = true; app.hidden = false;
     $('acctCode').textContent = account.code;
     $('by').value = (store.get('doms.by') || '').toUpperCase();

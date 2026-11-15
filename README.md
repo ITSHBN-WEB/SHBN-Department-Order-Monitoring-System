@@ -38,6 +38,7 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 ## Accounts and sign-in
 
 - Three accounts: **1008-SHBN**, **1015-SHPL**, **1007-SHPP**. Everyone signs in on the first screen with their account code and password.
+- A fourth account, **CENTRAL-ADMIN**, is view-only: it sees all three accounts' data on the Dashboard (combined, or one account via the dropdown) and cannot submit entries. Its Admin tab works with the head-office password only. It has no limits or entries of its own.
 - **Each account's data is completely separate**: its own entries, totals, recent activity and Admin list, tracked against **its own category limits** (see below). All accounts share the same cycle dates.
 - Passwords are stored only as salted hashes (never in plain text, never in this repo). The sign-in lasts 12 hours or until **Log out** (which also forgets the remembered name).
 - Existing entries made before accounts existed are assigned to **1008-SHBN** automatically (once, on the first start after deploying).

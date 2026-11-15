@@ -1,5 +1,5 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { requireAccount } from '../lib/auth.js';
+import { requireAccount, isCentral } from '../lib/auth.js';
 import { loadSettings, currentCycle, todayKL } from '../lib/cycle.js';
 
 const fmtDMY = (s) => s.split('-').reverse().join('/');
@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     await ensureSchema(sql);
     const acct = await requireAccount(req, res, sql);
     if (!acct) return;
+    if (isCentral(acct)) return res.status(403).json({ error: 'Central Admin is view-only. Sign in to a branch account to submit entries.' });
     const settings = await loadSettings(sql);
     const today = todayKL();
     const { started, current, opensOn } = currentCycle(settings, today);
