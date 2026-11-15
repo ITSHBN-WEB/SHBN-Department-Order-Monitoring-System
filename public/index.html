@@ -573,9 +573,8 @@ select.field { appearance: auto; }
     const arowHtml = (label, r, l) => `<div class="row arow"><span class="name">${esc(label)}</span>${barHtml(r, l)}<span class="amt num"><b>${money(r)}</b> <span>/ ${money(l)}</span></span><span class="st">${pillHtml(r, l)}</span></div>`;
     const deptHtml = groups.map((g) => {
       if (multi) {
-        const sums = d.branches.map((a) => ({ a, l: g.items.reduce((x, c) => x + accOf(c, a).limit, 0), r: g.items.reduce((x, c) => x + accOf(c, a).received, 0) }));
         return `<section class="card dept" aria-label="${esc(g.name)}">
-          <div class="dept-head"><h2>${esc(g.name)}</h2><div></div>${sums.map((x) => arowHtml(x.a, x.r, x.l)).join('')}</div>
+          <div class="dept-head"><h2>${esc(g.name)}</h2></div>
           <ul class="rows">${g.items.map((c) => `<li class="mcat"><div class="mhead">${esc(c.name)}</div>${d.branches.map((a) => { const x = accOf(c, a); return arowHtml(a, x.received, x.limit); }).join('')}</li>`).join('')}</ul>
         </section>`;
       }
