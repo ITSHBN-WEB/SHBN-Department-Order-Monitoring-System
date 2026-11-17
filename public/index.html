@@ -77,6 +77,15 @@ h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
 .fopt small { margin-left: auto; color: var(--muted); font-size: 11.5px; }
 .fsub { font-size: 11px; color: var(--muted); padding: 8px 6px 2px; letter-spacing: .05em; text-transform: uppercase; }
 .fclear { margin-top: 16px; width: 100%; }
+.overbox { margin: -4px 0 22px; border-color: rgba(248,113,113,.38); overflow: hidden; }
+.overbox-h { display: flex; align-items: center; gap: 8px; padding: 11px 18px; background: var(--over-soft); color: var(--over); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.overbox-h svg { width: 16px; height: 16px; }
+.ob-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 9px 18px; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.ob-row .nm { flex: 1 1 220px; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.ob-row .nm small { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+.ob-row .amt { color: var(--muted); white-space: nowrap; }
+.ob-row .amt b { color: var(--text); font-weight: 600; }
+.ob-row .by { color: var(--over); font-weight: 600; white-space: nowrap; min-width: 150px; text-align: right; }
 .kpis.k3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .mcat { border-bottom: 1px solid var(--line-soft); padding: 8px 0 6px; }
 .rows li.mcat:last-child { border-bottom: 0; }
@@ -571,6 +580,17 @@ select.field { appearance: auto; }
     }
 
     const arowHtml = (label, r, l) => `<div class="row arow"><span class="name">${esc(label)}</span>${barHtml(r, l)}<span class="amt num"><b>${money(r)}</b> <span>/ ${money(l)}</span></span><span class="st">${pillHtml(r, l)}</span></div>`;
+    // Over-budget summary: every category (per account in the combined view) that has passed its limit
+    const overItems = [];
+    for (const c of cats) {
+      if (multi) { for (const a of d.branches) { const x = accOf(c, a); if (x.received > x.limit) overItems.push({ acc: a, c, r: x.received, l: x.limit }); } }
+      else if (c.received > c.limit) overItems.push({ acc: null, c, r: c.received, l: c.limit });
+    }
+    overItems.sort((x, y) => (y.r - y.l) - (x.r - x.l));
+    const overHtml = overItems.length ? `<section class="card overbox" aria-label="Over budget categories">
+        <div class="overbox-h">${icons.warn}Over budget · ${overItems.length} ${overItems.length === 1 ? 'category' : 'categories'}</div>
+        ${overItems.map((o) => `<div class="ob-row"><span class="nm">${o.acc ? `<span class="pill acc">${esc(o.acc)}</span> ` : ''}${esc(o.c.name)}<small>${esc(o.c.department)}</small></span><span class="amt num"><b>${money(o.r)}</b> / ${money(o.l)}</span><span class="by num">Over by ${money(Math.round((o.r - o.l) * 100) / 100)} · ${pctText(pctOf(o.r, o.l))}</span></div>`).join('')}
+      </section>` : '';
     const deptHtml = groups.map((g) => {
       if (multi) {
         return `<section class="card dept" aria-label="${esc(g.name)}">
@@ -626,6 +646,7 @@ select.field { appearance: auto; }
         <div class="card kpi ${remaining < 0 ? 'bad' : ''}"><small>${remaining < 0 ? 'Over total limit' : 'Remaining'}</small><strong class="num">${money(Math.abs(remaining))}</strong><em>${cy.status === 'active' ? `${pctText(timePct)} of cycle elapsed` : '&nbsp;'}</em></div>
         <div class="card kpi ${over.length ? 'bad' : ''}"><small>Alerts</small><strong class="num">${over.length} over</strong><em>${near.length} near limit (80%+)</em></div>
       </div>`}
+      ${overHtml}
       ${deptHtml}`;
 
     if (d.central) renderFilters();
