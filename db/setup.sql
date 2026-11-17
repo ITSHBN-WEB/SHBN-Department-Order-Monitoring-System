@@ -54,6 +54,13 @@ create index if not exists entries_account_idx on entries (account, cycle_no, ca
 create index if not exists entries_cycle_cat_idx on entries (cycle_no, category_id);
 create index if not exists entries_created_idx   on entries (created_at desc);
 
+-- log of every record adjustment (edit / delete) made by Central Admin, with before / after values
+create table if not exists adjustments (
+  id bigserial primary key, at timestamptz not null default now(), by_account text not null,
+  action text not null check (action in ('edit', 'delete')), entry_id bigint, account text, cycle_no int,
+  category text, department text, value numeric(14,2), submitted_by text,
+  new_category text, new_value numeric(14,2), new_submitted_by text);
+
 -- Tracking settings (only inserted if missing, so re-running never resets them)
 insert into settings (key, value) values
   ('tracking_start', '2026-11-01'),   -- live cycle 1 starts here
@@ -65,11 +72,8 @@ on conflict (key) do nothing;
 
 update entries set submitted_by = upper(submitted_by) where submitted_by <> upper(submitted_by);
 
--- Admin tab passwords (hashes): per-account admin, and head-office admin for all accounts
-insert into settings (key, value) values
-  ('admin_hash', 'scrypt$qP7RAkDQl1NnTCqtf8vfSg==$nZNWs6aZhMi8nvE1TpfMrP+iOgr3fngnDTaK+kDUZYo='),
-  ('hq_hash',    'scrypt$00Ft+txDUte+/JMCX8EF7g==$pnMXq/AF6ZmfvMwS1DN1Rb4xRdmfGKYZDCjRYTj1xmA=')
-on conflict (key) do nothing;
+-- (the old Admin-tab passwords are no longer used; only the signed-in Central Admin can adjust records)
+delete from settings where key in ('admin_hash', 'hq_hash');
 
 -- Department / category / limit value (from Department_Value.xlsx)
 insert into categories (department, name, limit_value, sort_order) values

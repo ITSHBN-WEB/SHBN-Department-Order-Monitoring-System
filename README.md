@@ -47,13 +47,11 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 
 ## Admin tab (edit / delete entries)
 
-- Sidebar -> **Admin**. You must be signed in, and then enter an admin password (checked on the server for every request):
-  - **Account admin password** -> edit/delete only the signed-in account's own entries.
-  - **Head-office password** -> edit/delete entries of **all** accounts. Extra "Account" filter and column; an entry's account itself cannot be changed.
-- Flow: pick the **Period (cycle)** -> filter by **Department** -> optionally a **Category** -> **Edit** (category, value, submitted by) or **Delete** a row -> press **Save changes**.
+- Sidebar -> **Record Adjustments**. This tab exists **only for the Central Admin account**: no other account sees it, and the server refuses its requests from anyone else. No extra password is asked.
+- Central Admin can edit/delete entries of **all** accounts (Account filter and column; an entry's account itself cannot be changed).
+- Flow: pick the **Period (cycle)** -> filter by **Account** and/or **Department** -> optionally a **Category** -> **Edit** (category, value, submitted by) or **Delete** a row -> press **Save changes**.
 - Edits and deletions are staged first (rows are highlighted, **Undo** is available) and only written when you press Save. All changes are saved together, all-or-nothing.
-- Edited entries show an "Edited" tag. The admin view locks after 15 minutes of inactivity, or with the Lock button.
-- Change the admin passwords with `scripts/hash-password.js` (it prints the SQL for `admin_hash` and `hq_hash`).
+- Edited entries show an "Edited" tag. Every edit/delete is also written to the `adjustments` table (before/after values) and shown in the **Recent Activity** box at the right of the tab.
 
 ## Deploy (once)
 

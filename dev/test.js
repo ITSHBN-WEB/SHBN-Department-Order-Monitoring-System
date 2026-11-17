@@ -24,8 +24,6 @@ const call = (handler, { method = 'GET', query = {}, body, as = '1008-SHBN', coo
   });
 
 // Test-only passwords (the real ones are never in the repo; the seeded hashes are checked by hand).
-await sql`update settings set value = ${hashPassword('test-admin')} where key = 'admin_hash'`;
-await sql`update settings set value = ${hashPassword('test-hq')} where key = 'hq_hash'`;
 
 // Malaysia date (UTC+8) to match the app's own clock; plain UTC differs between 00:00 and 08:00 KL.
 const iso = (offsetDays) => new Date(Date.now() + 8 * 3600000 + offsetDays * 86400000).toISOString().slice(0, 10);
@@ -184,12 +182,10 @@ assert.equal(r.body.cycle.n, 2);
 
 // --- Admin API ----------------------------------------------------------------------------
 const { default: admin } = await import('../api/admin.js');
-const adm = (body, as) => call(admin, { method: 'POST', as, body: { password: 'test-admin', ...body } });
-assert.equal((await call(admin, { method: 'POST', body: { action: 'list', cycle: 2 } })).code, 401);          // no password
-assert.equal((await call(admin, { method: 'POST', body: { password: '1234', action: 'login' } })).code, 401); // wrong password
-assert.equal((await call(admin, { method: 'POST', as: null, body: { password: 'test-admin', action: 'login' } })).code, 401); // right password but not signed in
+const adm = (body, as = 'CENTRAL-ADMIN') => call(admin, { method: 'POST', as, body });      // Record Adjustments: Central Admin only, no extra password
+assert.equal((await call(admin, { method: 'POST', as: null, body: { action: 'list', cycle: 2 } })).code, 401);   // not signed in
 assert.equal((await call(admin, { method: 'GET' })).code, 405);
-assert.equal((await adm({ action: 'login' })).code, 200);
+assert.equal((await adm({ action: 'list', cycle: 2 }, '1008-SHBN')).code, 403);                                 // a branch account is refused
 
 r = await adm({ action: 'meta' });
 assert.deepEqual(r.body.cycles.map((c) => c.n), [0, 1, 2]);
@@ -235,6 +231,15 @@ const bads = [
 for (const b of bads) assert.equal((await adm({ action: 'save', ...b })).code, 400, JSON.stringify(b));
 r = await adm({ action: 'list', cycle: 2, categoryId: pet });
 assert.equal(r.body.entries.find((e) => e.id === e1.id).value, 250.46);
+// every edit / delete is logged with before and after values (the validation failures and the repeated delete above are not)
+r = await adm({ action: 'activity' });
+assert.equal(r.body.activity.length, 2);
+{
+  const ed = r.body.activity.find((a) => a.action === 'edit'), de = r.body.activity.find((a) => a.action === 'delete');
+  assert.deepEqual([ed.category, ed.newCategory, ed.newValue, ed.newSubmittedBy, ed.department], ['BABY CARE', 'PET FOOD', 250.46, 'NEW NAME', 'NONFOOD']);
+  assert.ok([100, 200].includes(ed.value) && ed.ts > 0);
+  assert.deepEqual([de.category, de.newValue ?? null], ['BABY CARE', null]);
+}
 
 // --- Accounts: sign-in ----------------------------------------------------------------------
 const { default: auth } = await import('../api/auth.js');
@@ -266,7 +271,7 @@ assert.match(r.headers['Set-Cookie'], /Max-Age=0/);
 for (const bad of ['', 'doms_session=garbage', cookiePL.slice(0, -3) + 'xyz', `doms_session=${signSession('1008-SHBN', Date.now() - 13 * 3600e3)}`, `doms_session=${signSession('0000-GONE')}`]) {
   assert.equal((await call(dashboard, { cookie: bad, as: null })).code, 401, bad.slice(0, 40));
   assert.equal((await call(entries, { method: 'POST', cookie: bad, as: null, body: { categoryId: 1, value: 5, submittedBy: 'x' } })).code, 401);
-  assert.equal((await call(admin, { method: 'POST', cookie: bad, as: null, body: { action: 'login', password: 'test-admin' } })).code, 401);
+  assert.equal((await call(admin, { method: 'POST', cookie: bad, as: null, body: { action: 'meta' } })).code, 401);
 }
 // tokens are bound to the signing key: a token for one account can't be edited into another
 const forged = cookiePL.replace(/^doms_session=[^.]+/, 'doms_session=' + Buffer.from(JSON.stringify({ a: '1008-SHBN', e: 9999999999 })).toString('base64url'));
@@ -319,38 +324,37 @@ await sql`delete from account_limits where account = '1015-SHPL' and category_id
 assert.equal((await call(dashboard, { as: '1015-SHPL' })).body.categories.find((c) => c.name === 'RICE').limit, riceLimit('1008-SHBN'));
 await sql`insert into account_limits (account, category_id, limit_value) values ('1015-SHPL', ${rice2}, ${riceLimit('1015-SHPL')})`;
 
-// --- Admin: per-account scope (admin password) vs head office (hq password) ----------------------
+// --- Record Adjustments: Central Admin only ------------------------------------------------------
 const ids = Object.fromEntries((await sql`select account, min(id)::int as id from entries group by account`).map((x) => [x.account, x.id]));
-r = await adm({ action: 'meta' }, '1015-SHPL');
-assert.deepEqual([r.body.scope, r.body.account, r.body.accounts], ['account', '1015-SHPL', ['1015-SHPL']]);
-r = await adm({ action: 'list', cycle: 1 }, '1015-SHPL');
-assert.equal(r.body.entries.length, 2);
-assert.ok(r.body.entries.every((e) => e.account === '1015-SHPL'));
-r = await adm({ action: 'list', cycle: 1, account: '1008-SHBN' }, '1015-SHPL');   // trying to look at another account
-assert.ok(r.body.entries.every((e) => e.account === '1015-SHPL'));                // ...is ignored
-r = await adm({ action: 'save', deletes: [ids['1008-SHBN']], updates: [{ id: ids['1007-SHPP'], categoryId: rice2, value: 1, submittedBy: 'HACK' }] }, '1015-SHPL');
-assert.deepEqual([r.code, r.body.updated, r.body.deleted, r.body.missing], [200, 0, 0, 2]);   // nothing outside its own account changed
-assert.equal((await sql`select count(*)::int n from entries where id = ${ids['1008-SHBN']} and submitted_by = 'T'`)[0].n, 1);
-assert.equal((await sql`select count(*)::int n from entries where id = ${ids['1007-SHPP']} and submitted_by = 'HACK'`)[0].n, 0);
-r = await adm({ action: 'save', deletes: [ids['1015-SHPL']] }, '1015-SHPL');       // its own entry: fine
-assert.deepEqual([r.body.deleted, r.body.missing], [1, 0]);
+const countBefore = (await sql`select count(*)::int n from entries`)[0].n;
+for (const code of ['1015-SHPL', '1008-SHBN', '1007-SHPP']) {                    // branch accounts can do nothing here, whatever they ask for
+  for (const action of ['meta', 'list', 'activity', 'save']) {
+    r = await adm({ action, cycle: 1, deletes: [ids[code]], updates: [{ id: ids['1008-SHBN'], categoryId: rice2, value: 1, submittedBy: 'HACK' }] }, code);
+    assert.equal(r.code, 403, `${code} ${action}`);
+  }
+}
+assert.equal((await sql`select count(*)::int n from entries`)[0].n, countBefore);
+assert.equal((await sql`select count(*)::int n from entries where submitted_by = 'HACK'`)[0].n, 0);
 
-const hqCall = (body, as = '1007-SHPP') => call(admin, { method: 'POST', as, body: { password: 'test-hq', ...body } });
-r = await hqCall({ action: 'meta' });
-assert.deepEqual([r.body.scope, r.body.accounts], ['hq', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);
+r = await adm({ action: 'meta' });
+assert.deepEqual([r.body.scope, r.body.accounts], ['hq', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);   // Central Admin itself is not listed as a store
 assert.equal(r.body.cycles.find((c) => c.n === 1).count, (await sql`select count(*)::int n from entries where cycle_no = 1`)[0].n);   // counts cover all accounts
-r = await hqCall({ action: 'list', cycle: 1 });
+r = await adm({ action: 'list', cycle: 1 });
 assert.deepEqual([...new Set(r.body.entries.map((e) => e.account))].sort(), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
-r = await hqCall({ action: 'list', cycle: 1, account: '1008-SHBN' });
+r = await adm({ action: 'list', cycle: 1, account: '1008-SHBN' });
 assert.ok(r.body.entries.length > 0 && r.body.entries.every((e) => e.account === '1008-SHBN'));
-// head office edits and deletes entries belonging to other accounts
-r = await hqCall({ action: 'save', updates: [{ id: ids['1008-SHBN'], categoryId: rice2, value: 4321, submittedBy: 'hq fix' }], deletes: [ids['1007-SHPP']] });
+// Central Admin edits and deletes entries belonging to other accounts
+const logBefore = (await adm({ action: 'activity' })).body.activity.length;
+r = await adm({ action: 'save', updates: [{ id: ids['1008-SHBN'], categoryId: rice2, value: 4321, submittedBy: 'hq fix' }], deletes: [ids['1007-SHPP']] });
 assert.deepEqual([r.code, r.body.updated, r.body.deleted, r.body.missing], [200, 1, 1, 0]);
 const fixed = (await sql`select value::float8 v, submitted_by s, account from entries where id = ${ids['1008-SHBN']}`)[0];
 assert.deepEqual([fixed.v, fixed.s, fixed.account], [4321, 'HQ FIX', '1008-SHBN']);              // account itself is never changed
 assert.equal((await riceOf('1008-SHBN')).received, 4321 + 1 + 5);
-// the two admin passwords are not interchangeable with account passwords
-assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { password: 'pw-bn', action: 'login' } })).code, 401);
+r = await adm({ action: 'activity' });
+assert.equal(r.body.activity.length, logBefore + 2);
+assert.ok(r.body.activity.some((a) => a.action === 'edit' && a.account === '1008-SHBN' && a.newValue === 4321 && a.newSubmittedBy === 'HQ FIX'));
+assert.ok(r.body.activity.some((a) => a.action === 'delete' && a.account === '1007-SHPP'));
+assert.ok(r.body.activity.every((a) => a.ts > 0));
 
 // --- Central Admin: view-only account that sees every branch account -------------------------------------
 {
@@ -394,10 +398,6 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   // view-only: cannot submit
   r = await asAcct(CA, { value: 5 });
   assert.equal(r.code, 403);
-  // admin tab: only the head-office password works for it, and it covers every account
-  assert.equal((await call(admin, { method: 'POST', as: CA, body: { password: 'test-admin', action: 'login' } })).code, 401);
-  r = await call(admin, { method: 'POST', as: CA, body: { password: 'test-hq', action: 'meta' } });
-  assert.deepEqual([r.body.scope, r.body.accounts], ['hq', ['1007-SHPP', '1008-SHBN', '1015-SHPL']]);   // Central Admin itself is not listed as a store
 }
 
 // --- Upgrading an existing (pre-accounts) database keeps its entries and gives them to 1008-SHBN ---------------
@@ -416,7 +416,7 @@ assert.equal((await call(admin, { method: 'POST', as: '1008-SHBN', body: { passw
   const rows = await oldSql`select submitted_by, account from entries order by id`;
   assert.deepEqual(rows.map((x) => x.account), ['1008-SHBN', '1008-SHBN']);
   assert.equal((await oldSql`select count(*)::int n from accounts`)[0].n, 4);
-  assert.equal((await oldSql`select count(*)::int n from settings where key in ('admin_hash', 'hq_hash')`)[0].n, 2);
+  assert.equal((await oldSql`select count(*)::int n from settings where key in ('admin_hash', 'hq_hash')`)[0].n, 0);   // retired Admin-tab passwords are removed
   const lim = await oldSql`select account, limit_value::float8 v from account_limits order by account`;           // RICE got one row per account
   assert.deepEqual(lim.map((x) => x.account), ['1007-SHPP', '1008-SHBN', '1015-SHPL']);
   assert.deepEqual(lim.map((x) => x.v), ['1007-SHPP', '1008-SHBN', '1015-SHPL'].map((c) => LIMITS.find((l) => l[0] === c && l[2] === 'RICE')[3]));

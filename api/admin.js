@@ -1,17 +1,13 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { requireAccount, adminScope, isCentral, CENTRAL } from '../lib/auth.js';
+import { requireAccount, isCentral, CENTRAL } from '../lib/auth.js';
 import { loadSettings, currentCycle, describeCycle, todayKL } from '../lib/cycle.js';
 
 /**
- * Admin API (edit / delete submitted entries). One endpoint, POST only:
- *   { action: 'login' | 'meta' | 'list' | 'save', password, ... }
- * Every call needs (1) a signed-in account and (2) an admin password, both checked here on the server:
- *   - the per-account admin password  -> scope 'account': only the signed-in account's own entries
- *   - the head-office admin password  -> scope 'hq': entries of ALL accounts
- * Passwords are stored as hashes in the settings table (see scripts/hash-password.js to change them).
+ * Record Adjustments API (edit / delete submitted entries). One endpoint, POST only:
+ *   { action: 'meta' | 'list' | 'save' | 'activity', ... }
+ * Only the signed-in Central Admin account may use it (checked here on the server, from the signed session):
+ * it can edit or delete entries of ALL accounts. Every edit / delete is written to the `adjustments` log.
  */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 const MAX_ROWS = 500;
 const MAX_CHANGES = 300;
 
@@ -31,23 +27,24 @@ export default async function handler(req, res) {
     const acct = await requireAccount(req, res, sql);
     if (!acct) return;
 
-    let scope = await adminScope(sql, body.password);
-    if (isCentral(acct) && scope !== 'hq') scope = null;   // Central Admin owns no entries: only the head-office password applies
-    if (!scope) {
-      await sleep(400); // slows down password guessing
-      return res.status(401).json({ error: 'Incorrect password.', code: 'password' });
-    }
-    const hq = scope === 'hq';
+    if (!isCentral(acct)) return res.status(403).json({ error: 'Only Central Admin can adjust records.', code: 'forbidden' });
+    const scope = 'hq', hq = true;
 
     switch (body.action) {
-      case 'login':
-        return res.status(200).json({ ok: true, scope, account: acct });
+      case 'activity': {
+        const rows = await sql`
+          select id, (extract(epoch from at) * 1000)::float8 as ts, action, account, cycle_no as cycle,
+                 category, department, value::float8 as value, submitted_by as "submittedBy",
+                 new_category as "newCategory", new_value::float8 as "newValue", new_submitted_by as "newSubmittedBy"
+          from adjustments order by id desc limit 30`;
+        return res.status(200).json({ activity: rows.map((r) => ({ ...r, id: Number(r.id) })) });
+      }
 
       case 'meta': {
         const settings = await loadSettings(sql);
         const today = todayKL();
         const { phase, current } = currentCycle(settings, today);
-        const only = hq ? null : acct;
+        const only = null;
         const counts = Object.fromEntries(
           (await sql`select cycle_no, count(*)::int as n from entries
                      where (${only}::text is null or account = ${only}::text) group by cycle_no`).map((r) => [r.cycle_no, r.n]),
@@ -64,7 +61,7 @@ export default async function handler(req, res) {
         }
         const categories = await sql`select id, department, name from categories order by sort_order, id`;
         const defaultCycle = phase === 'upcoming' ? (cycles[0]?.n ?? 1) : current;
-        const accounts = hq ? (await sql`select code from accounts where code <> ${CENTRAL} order by code`).map((r) => r.code) : [acct];
+        const accounts = (await sql`select code from accounts where code <> ${CENTRAL} order by code`).map((r) => r.code);
         return res.status(200).json({ scope, account: acct, accounts, cycles, categories, defaultCycle });
       }
 
@@ -73,7 +70,7 @@ export default async function handler(req, res) {
         if (!Number.isInteger(cycle) || cycle < 0) return res.status(400).json({ error: 'Choose a period.' });
         const dept = typeof body.department === 'string' && body.department ? body.department : null;
         const catId = body.categoryId ? Number(body.categoryId) : null;
-        const only = hq ? (typeof body.account === 'string' && body.account ? body.account : null) : acct;
+        const only = typeof body.account === 'string' && body.account ? body.account : null;
         if (catId !== null && !Number.isInteger(catId)) return res.status(400).json({ error: 'Invalid category.' });
 
         const rows = await sql`
@@ -121,8 +118,13 @@ export default async function handler(req, res) {
         }
 
         // One SQL statement = one transaction: all edits and deletes apply together or not at all.
+        const touched = [...ids, ...deletes];
         const out = await sql`
-          with upd as (
+          with old as (
+            select e.id, e.account, e.cycle_no, e.value, e.submitted_by, c.name as category, c.department
+            from entries e join categories c on c.id = e.category_id
+            where e.id = any(${touched}::bigint[])
+          ), upd as (
             update entries e
                set category_id = u.category_id, value = u.value, submitted_by = u.submitted_by, edited_at = now()
               from unnest(${ids}::bigint[], ${cats}::int[], ${vals}::numeric[], ${bys}::text[])
@@ -131,8 +133,22 @@ export default async function handler(req, res) {
             returning e.id
           ), del as (
             delete from entries where id = any(${deletes}::bigint[]) and (${hq}::boolean or account = ${acct}::text) returning id
+          ), log_edit as (
+            insert into adjustments (by_account, action, entry_id, account, cycle_no, category, department, value, submitted_by, new_category, new_value, new_submitted_by)
+            select ${acct}, 'edit', o.id, o.account, o.cycle_no, o.category, o.department, o.value, o.submitted_by, nc.name, u.value, u.submitted_by
+            from old o
+            join unnest(${ids}::bigint[], ${cats}::int[], ${vals}::numeric[], ${bys}::text[]) as u(id, category_id, value, submitted_by) on u.id = o.id
+            join categories nc on nc.id = u.category_id
+            where o.id in (select id from upd)
+            returning id
+          ), log_del as (
+            insert into adjustments (by_account, action, entry_id, account, cycle_no, category, department, value, submitted_by)
+            select ${acct}, 'delete', o.id, o.account, o.cycle_no, o.category, o.department, o.value, o.submitted_by
+            from old o where o.id in (select id from del)
+            returning id
           )
-          select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted`;
+          select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted,
+                 (select count(*) from log_edit)::int + (select count(*) from log_del)::int as logged`;
         return res.status(200).json({
           ok: true,
           updated: out[0].updated,
