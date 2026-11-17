@@ -871,7 +871,34 @@ select.field { appearance: auto; }
       pv.textContent = `After this entry: ${pctText(p)} of limit used, ${money(c.limit - after)} remaining.`;
     }
   }
-  $('value').addEventListener('input', updatePreview);
+  /* Value box: numbers only, thousands separators while typing, and 2 decimals once you leave the box (1 -> 1.00, 9120 -> 9,120.00) */
+  const withCommas = (intPart) => intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const vEl = $('value');
+  vEl.addEventListener('input', () => {
+    const raw = vEl.value, caret = vEl.selectionStart ?? raw.length;
+    const keep = (str) => str.replace(/[^\d.]/g, '');
+    const before = keep(raw.slice(0, caret)).length;                     // digits/dot to the left of the caret
+    let t = keep(raw);
+    const dot = t.indexOf('.');
+    let int = dot < 0 ? t : t.slice(0, dot);
+    let dec = dot < 0 ? null : t.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+    int = int.replace(/^0+(?=\d)/, '');
+    if (int === '' && dec !== null) int = '0';
+    const out = withCommas(int) + (dec !== null ? '.' + dec : '');
+    vEl.value = out;
+    let n = 0, pos = 0;
+    if (caret >= raw.length) pos = out.length;                          // typing at the end: stay at the end
+    else while (pos < out.length && n < before) { if (/[\d.]/.test(out[pos])) n++; pos++; }
+    try { vEl.setSelectionRange(pos, pos); } catch { /* ignore */ }
+    updatePreview();
+  });
+  vEl.addEventListener('blur', () => {
+    const t = vEl.value.replace(/,/g, '');
+    if (t === '' || t === '.') { vEl.value = ''; updatePreview(); return; }
+    const [i, d = ''] = t.split('.');
+    vEl.value = withCommas(i || '0') + '.' + (d + '00').slice(0, 2);
+    updatePreview();
+  });
 
   /* ---------------- submit ---------------- */
   let toastTimer;
