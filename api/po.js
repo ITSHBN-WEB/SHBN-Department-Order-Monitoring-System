@@ -1,7 +1,7 @@
 import { getSql, ensureSchema } from '../lib/db.js';
 import { requireAccount } from '../lib/auth.js';
 import { loadSettings, currentCycle, todayKL } from '../lib/cycle.js';
-import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken } from '../lib/po.js';
+import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken, nextDeviceName } from '../lib/po.js';
 
 /**
  * PO Entry / PO Summary Report / Submitted Summary Report data for the signed-in account (test run: PO_ACCOUNTS only).
@@ -9,7 +9,9 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken } from '../lib/p
  *   GET  ?view=list                       all pushed POs (pending + submitted), newest first, plus whether a bookmark exists
  *   GET  ?view=pending                    pending POs for the three printable reports (preview)
  *   GET  ?view=submitted&from=&to=        saved reports (with their POs) saved between two dates (Kuala Lumpur calendar)
- *   POST { action: 'token' }              create (or replace) this account's Push to DOMS bookmark token
+ *   POST { action: 'token', id? }         add a computer (default name SHBN1, SHBN2, ...) and give it a new bookmark token; with id: replace that computer's token
+ *   POST { action: 'device_rename', id, name }  rename a computer
+ *   POST { action: 'device_delete', id }  remove a computer (its bookmark stops working)
  *   POST { action: 'submit', report, ids }  save the chosen pending POs of one report: adds each PO amount to its category budget
  *   POST { action: 'discard', id }        remove a pending PO (e.g. pushed by mistake) so it can be pushed again
  *   POST { action: 'po_edit', id, supplier, poCategoryId, brand, remark, dateVerified, dateReceived, amount }  edit a pending PO
@@ -45,10 +47,44 @@ export default async function handler(req, res) {
 
       if (body.action === 'token') {
         const token = newToken();
-        await sql`
-          insert into push_tokens (account, token_hash) values (${acct}, ${hashToken(token)})
-          on conflict (account) do update set token_hash = excluded.token_hash, created_at = now()`;
-        return res.status(200).json({ ok: true, token });
+        if (body.id !== undefined && body.id !== null) {
+          const id = Number(body.id);
+          const up = Number.isInteger(id) ? await sql`update push_devices set token_hash = ${hashToken(token)}, created_at = now(), last_used_at = null where id = ${id} and account = ${acct} returning id, name` : [];
+          if (!up.length) return res.status(404).json({ error: 'This computer was removed. Add it again.', code: 'gone' });
+          return res.status(200).json({ ok: true, token, device: { id: Number(up[0].id), name: up[0].name } });
+        }
+        // first free name; two computers adding at the same moment: the unique name index makes one retry with the next name
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const taken = (await sql`select name from push_devices where account = ${acct}`).map((x) => x.name);
+          const name = nextDeviceName(acct, taken);
+          try {
+            const ins = await sql`insert into push_devices (account, name, token_hash) values (${acct}, ${name}, ${hashToken(token)}) returning id, name`;
+            return res.status(200).json({ ok: true, token, device: { id: Number(ins[0].id), name: ins[0].name } });
+          } catch (err) { if (!(err && (err.code === '23505' || /duplicate key|unique/i.test(err.message || '')))) throw err; }
+        }
+        return res.status(409).json({ error: 'Could not add this computer. Please try again.' });
+      }
+
+      if (body.action === 'device_rename') {
+        const id = Number(body.id), name = String(body.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 30).toUpperCase();
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Unknown computer.' });
+        if (!name) return res.status(400).json({ error: 'Please enter a name.' });
+        try {
+          const up = await sql`update push_devices set name = ${name} where id = ${id} and account = ${acct} returning id`;
+          if (!up.length) return res.status(404).json({ error: 'This computer was removed.', code: 'gone' });
+        } catch (err) {
+          if (err && (err.code === '23505' || /duplicate key|unique/i.test(err.message || ''))) return res.status(409).json({ error: `The name ${name} is already used by another computer.` });
+          throw err;
+        }
+        return res.status(200).json({ ok: true, name });
+      }
+
+      if (body.action === 'device_delete') {
+        const id = Number(body.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Unknown computer.' });
+        const del = await sql`delete from push_devices where id = ${id} and account = ${acct} returning id`;
+        if (!del.length) return res.status(404).json({ error: 'This computer was already removed.', code: 'gone' });
+        return res.status(200).json({ ok: true });
       }
 
       if (body.action === 'discard') {
@@ -238,9 +274,9 @@ export default async function handler(req, res) {
                (extract(epoch from p.pushed_at) * 1000)::float8 as ts, p.report_id as "reportId", p.po_category_id as "pcId"
         from purchase_orders p join po_categories c on c.id = p.po_category_id
         where p.account = ${acct} order by p.id desc limit 300`;
-    const has = await sql`select 1 from push_tokens where account = ${acct}`;
+    const devs = await sql`select id, name, (extract(epoch from created_at) * 1000)::float8 as created, (extract(epoch from last_used_at) * 1000)::float8 as "lastUsed" from push_devices where account = ${acct} order by id`;
     const rows = listRows;
-    return res.status(200).json({ account: acct, hasToken: has.length > 0, categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })), rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: r.reportId == null ? null : Number(r.reportId) })) });
+    return res.status(200).json({ account: acct, devices: devs.map((x) => ({ ...x, id: Number(x.id) })), categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })), rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: r.reportId == null ? null : Number(r.reportId) })) });
   } catch (err) {
     console.error('po error', err);
     return res.status(500).json({ error: 'Could not load PO data.' });

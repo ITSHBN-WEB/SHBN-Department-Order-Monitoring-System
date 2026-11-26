@@ -1,12 +1,12 @@
 import { getSql, ensureSchema } from '../lib/db.js';
-import { accountForToken, cleanPush } from '../lib/po.js';
+import { accountForToken, cleanPush, touchToken } from '../lib/po.js';
 
 /**
  * Called by the "Push to DOMS" bookmark from the portal page (another website), so it is token-based, not cookie-based:
  *   GET  ?k=TOKEN&po=PONO  -> category list + "already recorded?" check, shown in the popup before sending
  *   POST (text/plain JSON { k, po:{...}, poCategoryId, brand, remark }) -> saves the PO as PENDING (the budget is NOT touched; it is added later when the PO is saved in a PO Summary Report)
  * text/plain keeps it a "simple" request, so the browser sends no pre-check (preflight) that portals often block.
- * The token (hash stored in push_tokens) is the only credential; it belongs to one account.
+ * The token (hash stored in push_devices, one per computer) is the only credential; it belongs to one account.
  */
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -37,6 +37,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, account: acct, categories: cats.map((c) => ({ id: Number(c.id), name: c.name, report: c.report })), duplicate: po ? await existing(po) : null });
     }
 
+    await touchToken(sql, body.k);
     const parsed = cleanPush(body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const v = parsed.value;

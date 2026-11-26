@@ -326,7 +326,7 @@ select.field { appearance: auto; }
   .alist.hq .arow .c-act { justify-content: flex-start; }
   .filters.hq { grid-template-columns: 1fr 1fr; }
 }
-/* PO Entry / PO Summary Report (Push to DOMS test run): full width, no right-hand panel */
+/* PO Entry / PO Summary Report (Push to DOMS): full width, no right-hand panel */
 .app.is-wide { grid-template-columns: 224px minmax(0, 1fr); }
 .app.is-wide .panel { display: none; }
 @media (max-width: 1180px) { .app.is-wide { grid-template-columns: 200px minmax(0, 1fr); } }
@@ -1064,9 +1064,9 @@ select.field { appearance: auto; }
   const touch = () => { A.last = Date.now(); };
 
 
-  /* ---------------- PO Entry + PO Summary Report (Push to DOMS test run, 1008-SHBN) ---------------- */
+  /* ---------------- PO Entry + PO Summary Report (Push to DOMS, 1008-SHBN for now) ---------------- */
   const poEl = $('poMain'), rptEl = $('rptMain');
-  const P = { rows: null, cats: [], hasToken: false, q: '', loading: false, err: '' };
+  const P = { rows: null, cats: [], devices: [], q: '', loading: false, err: '' };
   const R = { data: null, report: 'FOOD', sel: new Set(), msg: null, err: '' };
   const S = { data: null, report: 'ALL', from: '', to: '', open: null, edit: null, err: '' };
   const subEl = $('subMain');
@@ -1074,7 +1074,7 @@ select.field { appearance: auto; }
   const dmyDot = (s) => (s ? s.slice(0, 10).split('-').reverse().join('.') : '');
   const dmySlash = (s) => (s ? s.slice(0, 10).split('-').reverse().join('/') : '');
 
-  function poReset() { P.rows = null; P.hasToken = false; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; }
+  function poReset() { P.rows = null; P.devices = []; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; }
   async function poApi(url, opts) {
     const r = await fetch(url, { cache: 'no-store', ...opts });
     const j = await r.json().catch(() => ({}));
@@ -1086,27 +1086,34 @@ select.field { appearance: auto; }
 
   async function poEnter() {
     if (!P.rows) poEl.innerHTML = '<div class="skeleton">Loading…</div>';
-    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.hasToken = j.hasToken; P.cats = j.categories; P.err = ''; }
+    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.devices = j.devices; P.cats = j.categories; P.err = ''; }
     catch (err) { if (err.auth) return; P.err = err.message; }
     renderPo();
   }
   function renderPo() {
     if (P.err && !P.rows) { poEl.innerHTML = `<div class="banner">${icons.warn}<div>${esc(P.err)}</div></div>`; return; }
     const token = store.get('doms.pushToken');
-    const usable = P.hasToken && token;
+    const myId = Number(store.get('doms.pushDevice'));
+    const mine = P.devices.find((x) => x.id === myId);
+    const usable = !!(mine && token);
+    const ago = (t) => (t ? when(t) : 'Never');
     const q = P.q.trim().toUpperCase();
     const rows = P.rows.filter((r) => !q || [r.poNo, r.supplier, r.category, r.brand, r.remark, r.reference].join(' ').toUpperCase().includes(q));
     poEl.innerHTML = `
-      <div class="top"><div><h1>PO Entry</h1><div class="sub">Purchase orders pushed from the portal · ${esc(state.auth.code)} (test run)</div></div></div>
+      <div class="top"><div><h1>PO Entry</h1><div class="sub">Purchase orders pushed from the portal · ${esc(state.auth.code)}</div></div></div>
       <section class="card pocard" aria-label="Push to DOMS bookmark">
         <h2>Push to DOMS bookmark</h2>
-        ${usable ? `<p>Drag this button to your browser's bookmarks bar (do not click it here):</p>
+        ${usable ? `<p>This computer is <b>${esc(mine.name)}</b>. Drag this button to your browser's bookmarks bar (do not click it here):</p>
           <div class="pobtns"><a class="pushlink" id="pushLink" href="${esc(bookmarkHref(token))}" title="Drag me to the bookmarks bar">📌 Push to DOMS</a>
-          <button type="button" class="sbtn" id="tokReset">Create a new bookmark</button></div>
+          <button type="button" class="sbtn" id="tokReplace">Replace this bookmark</button></div>
           <ol><li>Open a Purchase Order on the portal (View PO Detail).</li><li>Click the <b>Push to DOMS</b> bookmark.</li><li>In the popup choose the <b>Category</b>, check the <b>Brand</b>, add a <b>Remark</b> if needed, then <b>Send to DOMS</b>.</li></ol>
-          <p>A pushed PO is PENDING: it does not change any budget yet. Open <b>PO Summary Report</b> to preview, then <b>Save entry &amp; Print</b> to add it to the budget. A PO No that is already recorded is blocked. Creating a new bookmark stops the old one from working.</p>`
-        : `<p>${P.hasToken ? 'This browser does not have your bookmark saved. Create a new one (the old bookmark stops working).' : 'Create your bookmark first. It reads the Purchase Order on the portal page and sends it to DOMS.'}</p>
-          <div class="pobtns"><button type="button" class="sbtn primary" id="tokMake">Create my bookmark</button></div>`}
+          <p>A pushed PO is PENDING: it does not change any budget yet. Open <b>PO Summary Report</b> to preview, then <b>Save entry &amp; Print</b> to add it to the budget. A PO No that is already recorded is blocked.</p>`
+        : `<p>${P.devices.length ? 'This computer has no bookmark yet. Add it: every computer gets its own bookmark and they all work at the same time.' : 'Create your first bookmark. It reads the Purchase Order on the portal page and sends it to DOMS.'}</p>
+          <div class="pobtns"><button type="button" class="sbtn primary" id="tokMake">Add this computer</button></div>`}
+        ${P.devices.length ? `<h2 style="margin-top:18px">Computers with a bookmark</h2>
+          <div class="poscroll"><table class="potable"><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+          <tbody>${P.devices.map((x) => `<tr><td><b>${esc(x.name)}</b>${x.id === myId && usable ? ' <span class="pill done">THIS COMPUTER</span>' : ''}</td><td>${when(x.created)}</td><td>${ago(x.lastUsed)}</td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-dren="${x.id}">Rename</button> <button type="button" class="mini danger" data-ddel="${x.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>
+          <p>Removing a computer stops only its bookmark. To use the same bookmark on another computer, copy this one (browser bookmark sync) or open DOMS there and press <b>Add this computer</b>.</p>` : ''}
       </section>
       <section class="card" aria-label="Pushed purchase orders">
         <div class="alist-head"><strong>${P.rows.length} pushed PO${P.rows.length === 1 ? '' : 's'}</strong>
@@ -1116,13 +1123,25 @@ select.field { appearance: auto; }
           <tbody>${rows.length ? rows.map((r) => `<tr><td>${r.reportId ? '<span class="pill done">SAVED</span>' : '<span class="pill pend">PENDING</span>'}</td><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td>${r.reportId ? '' : `<span style="white-space:nowrap"><button type="button" class="mini" data-pedit="${r.id}">Edit</button> <button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button></span>`}</td></tr>`).join('') : `<tr><td colspan="11" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No POs pushed yet.'}</td></tr>`}</tbody>
         </table></div>
       </section>`;
-    const mk = $('tokMake') || $('tokReset');
-    if (mk) mk.onclick = async () => {
-      if (P.hasToken && !confirm('Create a new bookmark? Any bookmark you made before will stop working.')) return;
-      mk.disabled = true;
-      try { const j = await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'token' }) }); store.set('doms.pushToken', j.token); P.hasToken = true; renderPo(); toast('Bookmark created. Drag it to your bookmarks bar.'); }
-      catch (err) { if (!err.auth) toast(err.message, true); mk.disabled = false; }
+    const post = (body) => poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const mk = $('tokMake'), rp = $('tokReplace');
+    const issue = async (btn, body, msg) => {
+      btn.disabled = true;
+      try { const j = await post(body); store.set('doms.pushToken', j.token); store.set('doms.pushDevice', String(j.device.id)); await poEnter(); toast(msg(j.device.name)); }
+      catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
     };
+    if (mk) mk.onclick = () => issue(mk, { action: 'token' }, (n) => `${n} added. Drag the bookmark to your bookmarks bar.`);
+    if (rp) rp.onclick = () => { if (confirm(`Replace the bookmark of ${mine.name}? The old ${mine.name} bookmark stops working; your other computers are not affected.`)) issue(rp, { action: 'token', id: mine.id }, (n) => `New bookmark for ${n}. Drag it to your bookmarks bar.`); };
+    poEl.querySelectorAll('[data-dren]').forEach((b) => (b.onclick = async () => {
+      const d = P.devices.find((x) => x.id === Number(b.dataset.dren)); if (!d) return;
+      const name = prompt('Computer name:', d.name); if (name === null) return;
+      try { await post({ action: 'device_rename', id: d.id, name }); await poEnter(); toast('Renamed.'); } catch (err) { if (!err.auth) toast(err.message, true); }
+    }));
+    poEl.querySelectorAll('[data-ddel]').forEach((b) => (b.onclick = async () => {
+      const d = P.devices.find((x) => x.id === Number(b.dataset.ddel)); if (!d) return;
+      if (!confirm(`Remove ${d.name}? Its bookmark stops working. Other computers are not affected.`)) return;
+      try { await post({ action: 'device_delete', id: d.id }); await poEnter(); toast(d.name + ' removed.'); } catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
+    }));
     poEl.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
       if (!confirm(`Remove PO ${b.dataset.po} from DOMS? It has not been saved to the budget yet, and it can be pushed again.`)) return;
       try { await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discard', id: Number(b.dataset.del) }) }); R.data = null; await poEnter(); toast('PO removed.'); }
@@ -1209,7 +1228,7 @@ select.field { appearance: auto; }
     const total = picked.reduce((t, r) => t + r.amount, 0);
     const count = (code) => d.rows.filter((r) => r.report === code).length;
     rptEl.innerHTML = `
-      <div class="top rpt-top"><div><h1>PO Summary Report</h1><div class="sub">Pushed POs waiting to be saved · ${esc(state.auth.code)} (test run)</div></div></div>
+      <div class="top rpt-top"><div><h1>PO Summary Report</h1><div class="sub">Pushed POs waiting to be saved · ${esc(state.auth.code)}</div></div></div>
       ${R.msg ? `<div class="rptmsg nopr ${R.msg.warn ? 'warn' : ''}" role="status">${R.msg.html}</div>` : ''}
       <div class="rpt-controls">
         <div><label>Report</label><div class="tabs2" role="group" aria-label="Report">${d.reports.map((x) => `<button type="button" data-rep="${esc(x.code)}" aria-pressed="${x.code === rep.code}">${esc(repLabel(x.code))} (${count(x.code)})</button>`).join('')}</div></div>
@@ -1265,7 +1284,7 @@ select.field { appearance: auto; }
     const rep = open ? d.reports.find((x) => x.code === open.report) : null;
     const dt = (ts) => { const x = new Date(ts); return x.toLocaleDateString('en-GB') + ' ' + x.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); };
     subEl.innerHTML = `
-      <div class="top rpt-top"><div><h1>Submitted Summary Report</h1><div class="sub">Reports already saved to the budget · ${esc(state.auth.code)} (test run)</div></div></div>
+      <div class="top rpt-top"><div><h1>Submitted Summary Report</h1><div class="sub">Reports already saved to the budget · ${esc(state.auth.code)}</div></div></div>
       <div class="rpt-controls">
         <div><label>Report</label><div class="tabs2" role="group" aria-label="Report">${['ALL', ...d.reports.map((x) => x.code)].map((c) => `<button type="button" data-rep="${esc(c)}" aria-pressed="${c === S.report}">${c === 'ALL' ? 'All' : esc(repLabel(c))}</button>`).join('')}</div></div>
         <div><label for="sFrom">Saved from</label><input class="field" type="date" id="sFrom" value="${esc(S.from)}"></div>

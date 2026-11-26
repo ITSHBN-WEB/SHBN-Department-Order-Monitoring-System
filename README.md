@@ -66,12 +66,15 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 4 serverless functions) 
   - **Department** and **Category:** tick several to compare. Totals follow the ticks.
 - With **All accounts**, nothing is added together: each category lists the three accounts one under the other (1008-SHBN, 1007-SHPP, 1015-SHPL), each with its own bar, received / limit and status. The top cards show one card per account.
 
-## Push to DOMS (PO Entry + PO Summary Report) – test run, 1008-SHBN only
+## Push to DOMS (PO Entry, PO Summary Report, Submitted Summary Report) – 1008-SHBN only for now
 Only the 1008-SHBN account sees the **PO Entry**, **PO Summary Report** and **Submitted Summary Report** tabs (under Dashboard). Other accounts and Central Admin do not.
 
-**Set up the bookmark (once per browser)**
-1. PO Entry tab > **Create my bookmark**, then drag the **Push to DOMS** button to the bookmarks bar.
-2. Creating a new bookmark stops the old one working. The bookmark contains a private token (like a password): do not share it.
+**Set up the bookmark (once per computer)**
+1. PO Entry tab > **Add this computer**. The computer is named SHBN1, the next one SHBN2, and so on. Use **Rename** to give it a better name (e.g. COUNTER PC).
+2. Drag the **Push to DOMS** button to the bookmarks bar.
+3. Every computer has its own bookmark and they all work at the same time. Do the same on each computer (open DOMS there and press **Add this computer**), or copy the bookmark with your browser's bookmark sync.
+4. **Replace this bookmark** gives this computer a new bookmark (the old one stops working, other computers are not affected). **Remove** cuts one computer off. The list also shows when each computer was last used.
+5. The bookmark contains a private token (like a password): do not share it.
 
 **Use it**
 1. On the portal open the PO detail page (View PO Detail) and click the bookmark.

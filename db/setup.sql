@@ -225,6 +225,14 @@ insert into settings (key, value) values ('limits_v2', '1') on conflict (key) do
 
 -- Push to DOMS (PO Entry / PO Summary Report): bookmark tokens, PO categories, pushed purchase orders
 create table if not exists push_tokens (account text primary key references accounts(code), token_hash text not null, created_at timestamptz not null default now());
+create table if not exists push_devices (
+  id serial primary key, account text not null references accounts(code), name text not null,
+  token_hash text not null unique, created_at timestamptz not null default now(), last_used_at timestamptz);
+create unique index if not exists push_devices_name_idx on push_devices (account, upper(name));
+-- the single bookmark of the earlier version becomes this account's first computer (SHBN1)
+insert into push_devices (account, name, token_hash, created_at)
+select t.account, split_part(t.account, '-', 2) || '1', t.token_hash, t.created_at from push_tokens t
+where not exists (select 1 from push_devices d where d.account = t.account) on conflict do nothing;
 create table if not exists po_categories (
   id serial primary key, name text not null unique, category_id int not null references categories(id),
   report text not null, attn text not null, sort_order int not null);

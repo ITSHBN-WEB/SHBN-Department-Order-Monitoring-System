@@ -5,6 +5,7 @@ import { currentCycle, describeCycle } from '../lib/cycle.js';
 import { ensureSchema } from '../lib/db.js';
 import { hashPassword, signSession } from '../lib/auth.js';
 import { LIMITS } from '../lib/seed.js';
+import { hashToken } from '../lib/po.js';
 
 const sql = await createLocalDb();
 const { default: dashboard } = await import('../api/dashboard.js');
@@ -418,13 +419,14 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   for (const code of ['1015-SHPL', '1007-SHPP', CA]) assert.equal((await call(po, { as: code })).code, 403, code);
   assert.equal((await call(po, { as: null })).code, 401);
   r = await call(po);
-  assert.deepEqual([r.code, r.body.hasToken, r.body.rows.length], [200, false, 0]);
+  assert.deepEqual([r.code, r.body.devices, r.body.rows.length], [200, [], 0]);
   r = await call(po, { method: 'POST', body: { action: 'token' } });
   assert.equal(r.code, 200);
   const token = r.body.token;
+  assert.deepEqual([r.body.device.name], ['SHBN1']);                                      // default computer name
   assert.ok(token.length >= 30);
-  assert.equal((await sql`select count(*)::int n from push_tokens where token_hash = ${token}`)[0].n, 0);   // only a hash is stored
-  assert.equal((await call(po)).body.hasToken, true);
+  assert.equal((await sql`select count(*)::int n from push_devices where token_hash = ${token}`)[0].n, 0);   // only a hash is stored
+  assert.deepEqual((await call(po)).body.devices.map((x) => x.name), ['SHBN1']);
   assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'token' } })).code, 403);
 
   // the popup's pre-check: bad / missing token is refused, CORS lets the portal page read the answer, no cookie needed
@@ -609,10 +611,52 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   r = await call(po, { method: 'POST', body: { action: 'report_save', reportId: r.body.reportId, updates: [], deletes: [only.id] } });
   assert.deepEqual([r.code, r.body.reportGone], [200, true]);
 
-  // creating a new bookmark invalidates the old one
+  // several computers: every one gets its own bookmark (SHBN1, SHBN2, ...); they all work at the same time
+  const t1 = token;
   r = await call(po, { method: 'POST', body: { action: 'token' } });
-  assert.equal((await check('HQ09999999', token)).code, 401);
+  assert.deepEqual([r.code, r.body.device.name], [200, 'SHBN2']);
+  const t2 = r.body.token, id2 = r.body.device.id;
+  r = await call(po, { method: 'POST', body: { action: 'token' } });
+  const t3 = r.body.token, id3 = r.body.device.id;
+  assert.equal(r.body.device.name, 'SHBN3');
+  for (const t of [t1, t2, t3]) assert.equal((await check('HQ09999999', t)).code, 200);
+  r = await call(po);
+  assert.deepEqual(r.body.devices.map((x) => x.name), ['SHBN1', 'SHBN2', 'SHBN3']);
+  // two computers adding at the very same moment get different names
+  const pair = await Promise.all([call(po, { method: 'POST', body: { action: 'token' } }), call(po, { method: 'POST', body: { action: 'token' } })]);
+  assert.deepEqual(pair.map((x) => x.body.device.name).sort(), ['SHBN4', 'SHBN5']);
+  // the name can be edited (stored in capitals, unique per account); a freed name is used again
+  const ren = (id, name, as = '1008-SHBN') => call(po, { method: 'POST', as, body: { action: 'device_rename', id, name } });
+  assert.equal((await ren(id2, '  counter   pc ')).body.name, 'COUNTER PC');
+  assert.equal((await ren(id3, 'counter pc')).code, 409);
+  assert.equal((await ren(id3, '   ')).code, 400);
+  assert.equal((await ren(id2, 'x', '1015-SHPL')).code, 403);
+  assert.equal((await ren(99999, 'x')).code, 404);
+  assert.equal((await check('HQ09999999', t2)).code, 200);                                // renaming does not touch the token
+  // removing one computer stops only its bookmark
+  assert.equal((await call(po, { method: 'POST', body: { action: 'device_delete', id: id2 } })).code, 200);
+  assert.equal((await check('HQ09999999', t2)).code, 401);
+  assert.equal((await check('HQ09999999', t1)).code, 200);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'device_delete', id: id2 } })).code, 404);
+  assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'device_delete', id: id3 } })).code, 403);
+  // replacing one computer's bookmark keeps its name and cuts the old token of that computer only
+  r = await call(po, { method: 'POST', body: { action: 'token', id: id3 } });
+  assert.deepEqual([r.code, r.body.device.name, r.body.device.id], [200, 'SHBN3', id3]);
+  assert.equal((await check('HQ09999999', t3)).code, 401);
   assert.equal((await check('HQ09999999', r.body.token)).code, 200);
+  assert.equal((await check('HQ09999999', t1)).code, 200);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'token', id: 99999 } })).code, 404);
+  // a push marks the computer as used
+  await push({ k: t1, po: { po_no: 'HQ05550000', supplier: 'S', amount: 1 }, poCategoryId: pet.id });
+  assert.ok((await call(po)).body.devices.find((x) => x.name === 'SHBN1').lastUsed > 0);
+  // upgrade: the single bookmark of the earlier version becomes this account's first computer
+  await sql`delete from push_devices where account = '1008-SHBN'`;
+  await sql`insert into push_tokens (account, token_hash) values ('1008-SHBN', ${hashToken(t1)}) on conflict (account) do update set token_hash = excluded.token_hash`;
+  await ensureSchema(sql, true);
+  assert.deepEqual((await call(po)).body.devices.map((x) => x.name), ['SHBN1']);
+  assert.equal((await check('HQ09999999', t1)).code, 200);
+  await ensureSchema(sql, true);                                                          // running it again changes nothing
+  assert.equal((await call(po)).body.devices.length, 1);
 }
 
 // --- Upgrading an existing (pre-accounts) database keeps its entries and gives them to 1008-SHBN ---------------
