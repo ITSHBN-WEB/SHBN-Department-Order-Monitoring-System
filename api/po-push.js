@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     const sql = getSql();
     await ensureSchema(sql);
     const acct = await accountForToken(sql, req.method === 'GET' ? req.query?.k : body.k);
-    if (!acct) return res.status(401).json({ error: 'This bookmark is not valid any more. Open PO Entry in DOMS and create the bookmark again.', code: 'token' });
+    if (!acct) return res.status(401).json({ error: 'This bookmark is not valid any more. Open DOMS Bookmark in DOMS and create the bookmark again.', code: 'token' });
 
     const existing = async (poNo) => (await sql`
       select p.po_no, c.name as category, p.brand, (extract(epoch from p.pushed_at) * 1000)::float8 as ts

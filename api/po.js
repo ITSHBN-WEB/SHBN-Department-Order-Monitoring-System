@@ -268,6 +268,9 @@ export default async function handler(req, res) {
       });
     }
 
+    const devicesOf = async () => (await sql`select id, name, (extract(epoch from created_at) * 1000)::float8 as created, (extract(epoch from last_used_at) * 1000)::float8 as "lastUsed" from push_devices where account = ${acct} order by id`).map((x) => ({ ...x, id: Number(x.id) }));
+    if (req.query?.view === 'devices') return res.status(200).json({ account: acct, devices: await devicesOf() });
+
     const listRows = await sql`
         select p.id, p.po_no as "poNo", p.reference, p.supplier, p.date_received::text as "dateReceived", p.date_verified::text as "dateVerified",
                p.amount::float8 as amount, c.name as category, c.report, p.brand, p.remark,

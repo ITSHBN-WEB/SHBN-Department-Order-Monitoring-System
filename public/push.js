@@ -9,7 +9,7 @@
 
   var me = document.currentScript;
   if (!me || !me.src) { var all = document.getElementsByTagName('script'); for (var i = all.length - 1; i >= 0; i--) { if (/push\.js/.test(all[i].src)) { me = all[i]; break; } } }
-  if (!me) { alert('Push to DOMS: could not start. Please use the bookmark from the DOMS PO Entry page.'); return; }
+  if (!me) { alert('Push to DOMS: could not start. Please use the bookmark from the DOMS Bookmark tab.'); return; }
   var src = new URL(me.src);
   var APP = src.origin, TOKEN = src.searchParams.get('k') || '';
 

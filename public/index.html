@@ -331,7 +331,7 @@ select.field { appearance: auto; }
 .app.is-wide .panel { display: none; }
 @media (max-width: 1180px) { .app.is-wide { grid-template-columns: 200px minmax(0, 1fr); } }
 @media (max-width: 820px) { .app.is-wide { grid-template-columns: 1fr; } }
-.app:not(.has-po) .nav a[data-view="po"], .app:not(.has-po) .nav a[data-view="poreport"], .app:not(.has-po) .nav a[data-view="posubmitted"] { display: none !important; }
+.app:not(.has-po) .nav a[data-view="po"], .app:not(.has-po) .nav a[data-view="poreport"], .app:not(.has-po) .nav a[data-view="posubmitted"], .app:not(.has-po) .nav a[data-view="bookmark"] { display: none !important; }
 .modal-back { position: fixed; inset: 0; background: rgba(2,6,15,.62); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal-card { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; width: min(640px, 100%); max-height: 92vh; overflow: auto; }
 .modal-card h2 { margin: 0 0 4px; font-size: 16px; }
@@ -501,6 +501,10 @@ select.field { appearance: auto; }
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5h7l3 3v12H5z"/><path d="M12 2.5v3h3M7.5 11.5l2 2 3.5-4"/></svg>
         <span class="t">Submitted Summary Report</span>
       </a>
+      <a href="#bookmark" data-view="bookmark" aria-label="DOMS Bookmark">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 2.5h9v15L10 13.8 5.5 17.5z"/></svg>
+        <span class="t">DOMS Bookmark</span>
+      </a>
       <a href="#adjustments" data-view="admin" aria-label="Record Adjustments">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5l6 2.3v4.4c0 4-2.6 6.7-6 8.3-3.4-1.6-6-4.3-6-8.3V4.8l6-2.3z"/><path d="M7.5 10l1.9 1.9 3.3-3.6"/></svg>
         <span class="t">Record Adjustments</span>
@@ -519,6 +523,7 @@ select.field { appearance: auto; }
   <main class="main" id="poMain" hidden></main>
   <main class="main" id="rptMain" hidden></main>
   <main class="main" id="subMain" hidden></main>
+  <main class="main" id="bmMain" hidden></main>
 
   <aside class="panel" aria-label="New entry and recent activity">
     <div class="panel-inner">
@@ -1069,12 +1074,12 @@ select.field { appearance: auto; }
   const P = { rows: null, cats: [], devices: [], q: '', loading: false, err: '' };
   const R = { data: null, report: 'FOOD', sel: new Set(), msg: null, err: '' };
   const S = { data: null, report: 'ALL', from: '', to: '', open: null, edit: null, err: '' };
-  const subEl = $('subMain');
+  const subEl = $('subMain'), bmEl = $('bmMain');
   const f2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dmyDot = (s) => (s ? s.slice(0, 10).split('-').reverse().join('.') : '');
   const dmySlash = (s) => (s ? s.slice(0, 10).split('-').reverse().join('/') : '');
 
-  function poReset() { P.rows = null; P.devices = []; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; }
+  function poReset() { P.rows = null; P.devices = []; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; bmEl.innerHTML = ''; B.devices = null; B.err = ''; }
   async function poApi(url, opts) {
     const r = await fetch(url, { cache: 'no-store', ...opts });
     const j = await r.json().catch(() => ({}));
@@ -1086,35 +1091,16 @@ select.field { appearance: auto; }
 
   async function poEnter() {
     if (!P.rows) poEl.innerHTML = '<div class="skeleton">Loading…</div>';
-    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.devices = j.devices; P.cats = j.categories; P.err = ''; }
+    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.cats = j.categories; P.err = ''; }
     catch (err) { if (err.auth) return; P.err = err.message; }
     renderPo();
   }
   function renderPo() {
     if (P.err && !P.rows) { poEl.innerHTML = `<div class="banner">${icons.warn}<div>${esc(P.err)}</div></div>`; return; }
-    const token = store.get('doms.pushToken');
-    const myId = Number(store.get('doms.pushDevice'));
-    const mine = P.devices.find((x) => x.id === myId);
-    const usable = !!(mine && token);
-    const ago = (t) => (t ? when(t) : 'Never');
     const q = P.q.trim().toUpperCase();
     const rows = P.rows.filter((r) => !q || [r.poNo, r.supplier, r.category, r.brand, r.remark, r.reference].join(' ').toUpperCase().includes(q));
     poEl.innerHTML = `
       <div class="top"><div><h1>PO Entry</h1><div class="sub">Purchase orders pushed from the portal · ${esc(state.auth.code)}</div></div></div>
-      <section class="card pocard" aria-label="Push to DOMS bookmark">
-        <h2>Push to DOMS bookmark</h2>
-        ${usable ? `<p>This computer is <b>${esc(mine.name)}</b>. Drag this button to your browser's bookmarks bar (do not click it here):</p>
-          <div class="pobtns"><a class="pushlink" id="pushLink" href="${esc(bookmarkHref(token))}" title="Drag me to the bookmarks bar">📌 Push to DOMS</a>
-          <button type="button" class="sbtn" id="tokReplace">Replace this bookmark</button></div>
-          <ol><li>Open a Purchase Order on the portal (View PO Detail).</li><li>Click the <b>Push to DOMS</b> bookmark.</li><li>In the popup choose the <b>Category</b>, check the <b>Brand</b>, add a <b>Remark</b> if needed, then <b>Send to DOMS</b>.</li></ol>
-          <p>A pushed PO is PENDING: it does not change any budget yet. Open <b>PO Summary Report</b> to preview, then <b>Save entry &amp; Print</b> to add it to the budget. A PO No that is already recorded is blocked.</p>`
-        : `<p>${P.devices.length ? 'This computer has no bookmark yet. Add it: every computer gets its own bookmark and they all work at the same time.' : 'Create your first bookmark. It reads the Purchase Order on the portal page and sends it to DOMS.'}</p>
-          <div class="pobtns"><button type="button" class="sbtn primary" id="tokMake">Add this computer</button></div>`}
-        ${P.devices.length ? `<h2 style="margin-top:18px">Computers with a bookmark</h2>
-          <div class="poscroll"><table class="potable"><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th></th></tr></thead>
-          <tbody>${P.devices.map((x) => `<tr><td><b>${esc(x.name)}</b>${x.id === myId && usable ? ' <span class="pill done">THIS COMPUTER</span>' : ''}</td><td>${when(x.created)}</td><td>${ago(x.lastUsed)}</td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-dren="${x.id}">Rename</button> <button type="button" class="mini danger" data-ddel="${x.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>
-          <p>Removing a computer stops only its bookmark. To use the same bookmark on another computer, copy this one (browser bookmark sync) or open DOMS there and press <b>Add this computer</b>.</p>` : ''}
-      </section>
       <section class="card" aria-label="Pushed purchase orders">
         <div class="alist-head"><strong>${P.rows.length} pushed PO${P.rows.length === 1 ? '' : 's'}</strong>
           <input class="field" id="poQ" type="search" placeholder="Search PO, supplier, brand…" value="${esc(P.q)}" style="max-width:260px"></div>
@@ -1123,32 +1109,12 @@ select.field { appearance: auto; }
           <tbody>${rows.length ? rows.map((r) => `<tr><td>${r.reportId ? '<span class="pill done">SAVED</span>' : '<span class="pill pend">PENDING</span>'}</td><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td>${r.reportId ? '' : `<span style="white-space:nowrap"><button type="button" class="mini" data-pedit="${r.id}">Edit</button> <button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button></span>`}</td></tr>`).join('') : `<tr><td colspan="11" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No POs pushed yet.'}</td></tr>`}</tbody>
         </table></div>
       </section>`;
-    const post = (body) => poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const mk = $('tokMake'), rp = $('tokReplace');
-    const issue = async (btn, body, msg) => {
-      btn.disabled = true;
-      try { const j = await post(body); store.set('doms.pushToken', j.token); store.set('doms.pushDevice', String(j.device.id)); await poEnter(); toast(msg(j.device.name)); }
-      catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
-    };
-    if (mk) mk.onclick = () => issue(mk, { action: 'token' }, (n) => `${n} added. Drag the bookmark to your bookmarks bar.`);
-    if (rp) rp.onclick = () => { if (confirm(`Replace the bookmark of ${mine.name}? The old ${mine.name} bookmark stops working; your other computers are not affected.`)) issue(rp, { action: 'token', id: mine.id }, (n) => `New bookmark for ${n}. Drag it to your bookmarks bar.`); };
-    poEl.querySelectorAll('[data-dren]').forEach((b) => (b.onclick = async () => {
-      const d = P.devices.find((x) => x.id === Number(b.dataset.dren)); if (!d) return;
-      const name = prompt('Computer name:', d.name); if (name === null) return;
-      try { await post({ action: 'device_rename', id: d.id, name }); await poEnter(); toast('Renamed.'); } catch (err) { if (!err.auth) toast(err.message, true); }
-    }));
-    poEl.querySelectorAll('[data-ddel]').forEach((b) => (b.onclick = async () => {
-      const d = P.devices.find((x) => x.id === Number(b.dataset.ddel)); if (!d) return;
-      if (!confirm(`Remove ${d.name}? Its bookmark stops working. Other computers are not affected.`)) return;
-      try { await post({ action: 'device_delete', id: d.id }); await poEnter(); toast(d.name + ' removed.'); } catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
-    }));
     poEl.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
       if (!confirm(`Remove PO ${b.dataset.po} from DOMS? It has not been saved to the budget yet, and it can be pushed again.`)) return;
       try { await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discard', id: Number(b.dataset.del) }) }); R.data = null; await poEnter(); toast('PO removed.'); }
       catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
     }));
     poEl.querySelectorAll('[data-pedit]').forEach((b) => (b.onclick = () => { const r = P.rows.find((x) => x.id === Number(b.dataset.pedit)); if (r) openPoEdit(r); }));
-    const pl = $('pushLink'); if (pl) pl.onclick = (e) => { e.preventDefault(); toast('Drag this button to your bookmarks bar instead of clicking it.'); };
     const qi = $('poQ'); if (qi) qi.oninput = () => { P.q = qi.value; const pos = qi.selectionStart; renderPo(); const n = $('poQ'); n.focus(); n.setSelectionRange(pos, pos); };
   }
 
@@ -1188,6 +1154,59 @@ select.field { appearance: auto; }
         close(); R.data = null; toast('PO updated.'); await poEnter();
       } catch (err) { if (!err.auth) { toast(err.message, true); const b = $('mSave'); if (b) b.disabled = false; } }
     };
+  }
+
+
+  /* ----- DOMS Bookmark tab: one Push to DOMS bookmark per computer ----- */
+  const B = { devices: null, err: '' };
+  async function bmEnter() {
+    if (!B.devices) bmEl.innerHTML = '<div class="skeleton">Loading…</div>';
+    try { B.devices = (await poApi('/api/po?view=devices')).devices; B.err = ''; } catch (err) { if (err.auth) return; B.err = err.message; }
+    renderBm();
+  }
+  function renderBm() {
+    if (B.err && !B.devices) { bmEl.innerHTML = `<div class="banner">${icons.warn}<div>${esc(B.err)}</div></div>`; return; }
+    const token = store.get('doms.pushToken');
+    const myId = Number(store.get('doms.pushDevice'));
+    const mine = B.devices.find((x) => x.id === myId);
+    const usable = !!(mine && token);
+    const ago = (t) => (t ? when(t) : 'Never');
+    bmEl.innerHTML = `
+      <div class="top"><div><h1>DOMS Bookmark</h1><div class="sub">Push to DOMS bookmark for each computer · ${esc(state.auth.code)}</div></div></div>
+      <section class="card pocard" aria-label="Push to DOMS bookmark">
+        <h2>Push to DOMS bookmark</h2>
+        ${usable ? `<p>This computer is <b>${esc(mine.name)}</b>. Drag this button to your browser's bookmarks bar (do not click it here):</p>
+          <div class="pobtns"><a class="pushlink" id="pushLink" href="${esc(bookmarkHref(token))}" title="Drag me to the bookmarks bar">📌 Push to DOMS</a>
+          <button type="button" class="sbtn" id="tokReplace">Replace this bookmark</button></div>
+          <ol><li>Open a Purchase Order on the portal (View PO Detail).</li><li>Click the <b>Push to DOMS</b> bookmark.</li><li>In the popup choose the <b>Category</b>, check the <b>Brand</b>, add a <b>Remark</b> if needed, then <b>Send to DOMS</b>.</li></ol>
+          <p>A pushed PO is PENDING: it does not change any budget yet. Open <b>PO Summary Report</b> to preview, then <b>Save entry &amp; Print</b> to add it to the budget. A PO No that is already recorded is blocked.</p>`
+        : `<p>${B.devices.length ? 'This computer has no bookmark yet. Add it: every computer gets its own bookmark and they all work at the same time.' : 'Create your first bookmark. It reads the Purchase Order on the portal page and sends it to DOMS.'}</p>
+          <div class="pobtns"><button type="button" class="sbtn primary" id="tokMake">Add this computer</button></div>`}
+        ${B.devices.length ? `<h2 style="margin-top:18px">Computers with a bookmark</h2>
+          <div class="poscroll"><table class="potable"><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+          <tbody>${B.devices.map((x) => `<tr><td><b>${esc(x.name)}</b>${x.id === myId && usable ? ' <span class="pill done">THIS COMPUTER</span>' : ''}</td><td>${when(x.created)}</td><td>${ago(x.lastUsed)}</td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-dren="${x.id}">Rename</button> <button type="button" class="mini danger" data-ddel="${x.id}">Remove</button></td></tr>`).join('')}</tbody></table></div>
+          <p>Removing a computer stops only its bookmark. To use the same bookmark on another computer, copy this one (browser bookmark sync) or open DOMS there and press <b>Add this computer</b>.</p>` : ''}
+      </section>
+`;
+    const post = (body) => poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const mk = $('tokMake'), rp = $('tokReplace');
+    const issue = async (btn, body, msg) => {
+      btn.disabled = true;
+      try { const j = await post(body); store.set('doms.pushToken', j.token); store.set('doms.pushDevice', String(j.device.id)); await bmEnter(); toast(msg(j.device.name)); }
+      catch (err) { if (!err.auth) { toast(err.message, true); bmEnter(); } }
+    };
+    if (mk) mk.onclick = () => issue(mk, { action: 'token' }, (n) => `${n} added. Drag the bookmark to your bookmarks bar.`);
+    if (rp) rp.onclick = () => { if (confirm(`Replace the bookmark of ${mine.name}? The old ${mine.name} bookmark stops working; your other computers are not affected.`)) issue(rp, { action: 'token', id: mine.id }, (n) => `New bookmark for ${n}. Drag it to your bookmarks bar.`); };
+    bmEl.querySelectorAll('[data-dren]').forEach((b) => (b.onclick = async () => {
+      const d = B.devices.find((x) => x.id === Number(b.dataset.dren)); if (!d) return;
+      const name = prompt('Computer name:', d.name); if (name === null) return;
+      try { await post({ action: 'device_rename', id: d.id, name }); await bmEnter(); toast('Renamed.'); } catch (err) { if (!err.auth) toast(err.message, true); }
+    }));
+    bmEl.querySelectorAll('[data-ddel]').forEach((b) => (b.onclick = async () => {
+      const d = B.devices.find((x) => x.id === Number(b.dataset.ddel)); if (!d) return;
+      if (!confirm(`Remove ${d.name}? Its bookmark stops working. Other computers are not affected.`)) return;
+      try { await post({ action: 'device_delete', id: d.id }); await bmEnter(); toast(d.name + ' removed.'); } catch (err) { if (!err.auth) { toast(err.message, true); bmEnter(); } }
+    }));
   }
 
   /* ----- shared printable form (same layout as the sample SUMMARY_PO sheets) ----- */
@@ -1377,22 +1396,22 @@ select.field { appearance: auto; }
     }
   });
   window.addEventListener('afterprint', () => { const st = document.getElementById('pgnum'); if (st) st.remove(); });
-  const VIEW_EL = { dashboard: 'main', admin: 'adminMain', po: 'poMain', poreport: 'rptMain', posubmitted: 'subMain' };
+  const VIEW_EL = { dashboard: 'main', admin: 'adminMain', po: 'poMain', poreport: 'rptMain', posubmitted: 'subMain', bookmark: 'bmMain' };
   function showOnly(v) {
     view = v;
     app.classList.toggle('is-admin', v === 'admin');
-    app.classList.toggle('is-wide', v === 'po' || v === 'poreport' || v === 'posubmitted');
+    app.classList.toggle('is-wide', v === 'po' || v === 'poreport' || v === 'posubmitted' || v === 'bookmark');
     for (const [k, id] of Object.entries(VIEW_EL)) $(id).hidden = k !== v;
     document.querySelectorAll('.nav a').forEach((a) => (a.dataset.view === v ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
   }
-  const hashView = () => ({ '#adjustments': 'admin', '#po': 'po', '#poreport': 'poreport', '#posubmitted': 'posubmitted' }[location.hash] || 'dashboard');
-  const allowed = (v) => (v === 'admin' ? state.central : v === 'po' || v === 'poreport' || v === 'posubmitted' ? !!state.po : true);
+  const hashView = () => ({ '#adjustments': 'admin', '#po': 'po', '#poreport': 'poreport', '#posubmitted': 'posubmitted', '#bookmark': 'bookmark' }[location.hash] || 'dashboard');
+  const allowed = (v) => (v === 'admin' ? state.central : v === 'po' || v === 'poreport' || v === 'posubmitted' || v === 'bookmark' ? !!state.po : true);
   function setView(v) {
     if (view === 'admin' && v !== 'admin' && !discardOk()) return;
     if (!allowed(v)) v = 'dashboard';
     showOnly(v);
     try { history.replaceState(null, '', '#' + (v === 'admin' ? 'adjustments' : v)); } catch { /* ignore */ }
-    if (v === 'admin') adminEnter(); else if (v === 'po') poEnter(); else if (v === 'poreport') rptEnter(); else if (v === 'posubmitted') subEnter(); else if (state.data) load(state.view);
+    if (v === 'admin') adminEnter(); else if (v === 'po') poEnter(); else if (v === 'poreport') rptEnter(); else if (v === 'posubmitted') subEnter(); else if (v === 'bookmark') bmEnter(); else if (state.data) load(state.view);
   }
   document.querySelectorAll('.nav a, .brand-link').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); setView(a.dataset.view); }));
 
