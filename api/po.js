@@ -6,7 +6,7 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken, nextDeviceName 
 /**
  * PO Entry / PO Summary Report / Submitted Summary Report data for the signed-in account (test run: PO_ACCOUNTS only).
  * A pushed PO is PENDING: it does not touch the budget. It is added to the budget only when the user saves it in a summary report.
- *   GET  ?view=list                       all pushed POs (pending + submitted), newest first, plus whether a bookmark exists
+ *   GET  ?view=list                       pending POs (not yet saved in a report), newest first
  *   GET  ?view=pending                    pending POs for the three printable reports (preview)
  *   GET  ?view=submitted&from=&to=        saved reports (with their POs) saved between two dates (Kuala Lumpur calendar)
  *   POST { action: 'token', id? }         add a computer (default name SHBN1, SHBN2, ...) and give it a new bookmark token; with id: replace that computer's token
@@ -134,14 +134,16 @@ export default async function handler(req, res) {
         const o = out[0];
         if (!o || !o.report_id) return res.status(409).json({ error: 'None of the selected POs can be saved: they were already saved or removed. Reload the page.', code: 'gone' });
         const over = await sql`
-          select c.name as category, coalesce(al.limit_value, c.limit_value)::float8 as "limit",
-                 (select coalesce(sum(e.value), 0)::float8 from entries e where e.account = ${acct} and e.category_id = c.id and e.cycle_no = ${current}) as received
+          select c.name as category, c.department, coalesce(al.limit_value, c.limit_value)::float8 as "limit",
+                 (select coalesce(sum(e.value), 0)::float8 from entries e where e.account = ${acct} and e.category_id = c.id and e.cycle_no = ${current}) as received,
+                 (select coalesce(sum(p.amount), 0)::float8 from purchase_orders p join po_categories pc on pc.id = p.po_category_id
+                  where p.report_id = ${o.report_id} and pc.category_id = c.id) as added
           from categories c left join account_limits al on al.category_id = c.id and al.account = ${acct}
           where c.id in (select pc.category_id from purchase_orders p join po_categories pc on pc.id = p.po_category_id where p.report_id = ${o.report_id})
-          order by c.name`;
+          order by c.sort_order, c.name`;
         return res.status(200).json({
           ok: true, reportId: Number(o.report_id), saved: o.n, date: today, cycle: current,
-          categories: over.map((x) => ({ category: x.category, limit: x.limit, received: x.received, over: x.received > x.limit })),
+          categories: over.map((x) => ({ category: x.category, department: x.department, limit: x.limit, received: x.received, added: x.added, before: Math.round((x.received - x.added) * 100) / 100, over: x.received > x.limit })),
         });
       }
 
@@ -244,8 +246,7 @@ export default async function handler(req, res) {
 
     if (req.query?.view === 'submitted') {
       const today = todayKL();
-      const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 30);
-      const from = ISO_DAY(req.query.from, d.toISOString().slice(0, 10));
+      const from = ISO_DAY(req.query.from, today.slice(0, 8) + '01');          // default: from the 1st of this month
       const to = ISO_DAY(req.query.to, today);
       const reps = await sql`
         select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle,
@@ -276,7 +277,7 @@ export default async function handler(req, res) {
                p.amount::float8 as amount, c.name as category, c.report, p.brand, p.remark,
                (extract(epoch from p.pushed_at) * 1000)::float8 as ts, p.report_id as "reportId", p.po_category_id as "pcId"
         from purchase_orders p join po_categories c on c.id = p.po_category_id
-        where p.account = ${acct} order by p.id desc limit 300`;
+        where p.account = ${acct} and p.report_id is null order by p.id desc limit 300`;
     const devs = await sql`select id, name, (extract(epoch from created_at) * 1000)::float8 as created, (extract(epoch from last_used_at) * 1000)::float8 as "lastUsed" from push_devices where account = ${acct} order by id`;
     const rows = listRows;
     return res.status(200).json({ account: acct, devices: devs.map((x) => ({ ...x, id: Number(x.id) })), categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })), rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: r.reportId == null ? null : Number(r.reportId) })) });

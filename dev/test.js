@@ -512,6 +512,7 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   // Save entry for FROZEN/RTD (one PO) + NONFOOD (only one of two ticked): the budget changes only now
   r = await submit({ report: 'FROZEN/RTD', ids: [idOf.HQ01962198] });
   assert.deepEqual([r.code, r.body.saved, r.body.categories.map((c) => c.category)], [200, 1, ['BEVERAGES']]);
+  assert.deepEqual([r.body.categories[0].before, r.body.categories[0].added, r.body.categories[0].received, r.body.categories[0].limit > 0], [before, 1960.5, before + 1960.5, true]);   // budget impact for the popup
   assert.equal(await bevRecv(), before + 1960.5);
   const rep1 = r.body.reportId;
   const row1 = (await sql`select p.report_id::int rid, p.entry_id, e.value::float8 ev, e.submitted_by eby, e.account eacct, e.cycle_no ec, c.name cn from purchase_orders p join entries e on e.id = p.entry_id join categories c on c.id = e.category_id where p.po_no = 'HQ01962198'`)[0];
@@ -541,10 +542,11 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   r = await call(po, { query: { view: 'submitted' } });
   assert.deepEqual(r.body.saved.map((x) => [x.report, x.count, x.total, x.date === r.body.today]), [['NONFOOD', 1, 940, true], ['FROZEN/RTD', 1, 1960.5, true]]);
   assert.deepEqual(r.body.rows.map((x) => [x.reportId === r.body.saved[0].id, x.poNo]).sort().map((x) => x[1]), ['HQ01962198', 'HQ01970000']);
+  assert.equal(r.body.from, r.body.today.slice(0, 8) + '01');                              // default range starts on the 1st of the month
   assert.equal((await call(po, { query: { view: 'submitted', from: '2020-01-01', to: '2020-01-02' } })).body.saved.length, 0);
   assert.equal((await call(po, { as: '1015-SHPL', query: { view: 'submitted' } })).code, 403);
   r = await call(po);
-  assert.deepEqual(r.body.rows.map((x) => [x.poNo, x.reportId !== null]), [['HQ01970001', false], ['HQ01970000', true], ['HQ01964261', false], ['HQ01962198', true]]);
+  assert.deepEqual(r.body.rows.map((x) => [x.poNo, x.reportId]), [['HQ01970001', null], ['HQ01964261', null]]);   // PO Entry shows pending POs only; saved ones are in the reports
 
   // Central Admin edits / deletes a saved budget entry: the PO follows (amount synced, PO removed on delete so it can be pushed again)
   const e1 = (await sql`select entry_id::int id from purchase_orders where po_no = 'HQ01962198'`)[0].id;

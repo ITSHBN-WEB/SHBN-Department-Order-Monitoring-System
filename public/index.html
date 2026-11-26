@@ -335,6 +335,13 @@ select.field { appearance: auto; }
 .modal-back { position: fixed; inset: 0; background: rgba(2,6,15,.62); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal-card { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; width: min(640px, 100%); max-height: 92vh; overflow: auto; }
 .modal-card h2 { margin: 0 0 4px; font-size: 16px; }
+.modal-card.wide { width: min(860px, 100%); }
+.potable.grow td, .potable.grow th { padding: 8px 9px; } .potable.grow .barcol { min-width: 190px; }
+.potable.grow tr.ov td { background: rgba(248,113,113,.08); }
+.gbar { height: 9px; border-radius: 99px; background: rgba(148,163,184,.18); overflow: hidden; display: flex; margin-bottom: 4px; }
+.gbar i { display: block; height: 100%; } .gbar i.b { background: rgba(45,212,191,.45); } .gbar i.a { background: var(--accent); box-shadow: 0 0 8px rgba(45,212,191,.7); }
+.potable.grow tr.ov .gbar i.b { background: rgba(248,113,113,.45); } .potable.grow tr.ov .gbar i.a { background: #f87171; box-shadow: none; }
+#printArea { display: none; }
 .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 14px 0 6px; }
 .mgrid label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); } .mgrid .wide { grid-column: 1 / -1; }
 .mgrid input, .mgrid select { background: var(--bg, #0b1220); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: inherit; font-size: 14px; }
@@ -412,6 +419,10 @@ select.field { appearance: auto; }
   .paper th { font-size: 9px; }
   .paper h2 { font-size: 15px; margin-bottom: 10px; }
   .paper tr { break-inside: avoid; }
+  .modal-back { display: none !important; }
+  body[data-pa] .app { display: none !important; }
+  body[data-pa] #printArea { display: block; }
+  body[data-pa] #printArea .paper { background: #fff; }
 }
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 /* ---------- animated DOMS badge ---------- */
@@ -1100,13 +1111,13 @@ select.field { appearance: auto; }
     const q = P.q.trim().toUpperCase();
     const rows = P.rows.filter((r) => !q || [r.poNo, r.supplier, r.category, r.brand, r.remark, r.reference].join(' ').toUpperCase().includes(q));
     poEl.innerHTML = `
-      <div class="top"><div><h1>PO Entry</h1><div class="sub">Purchase orders pushed from the portal · ${esc(state.auth.code)}</div></div></div>
+      <div class="top"><div><h1>PO Entry</h1><div class="sub">Pushed from the portal, waiting to be saved in a report · ${esc(state.auth.code)}</div></div></div>
       <section class="card" aria-label="Pushed purchase orders">
-        <div class="alist-head"><strong>${P.rows.length} pushed PO${P.rows.length === 1 ? '' : 's'}</strong>
+        <div class="alist-head"><strong>${P.rows.length} pending PO${P.rows.length === 1 ? '' : 's'}</strong>
           <input class="field" id="poQ" type="search" placeholder="Search PO, supplier, brand…" value="${esc(P.q)}" style="max-width:260px"></div>
         <div class="poscroll"><table class="potable">
-          <thead><tr><th>Status</th><th>Pushed</th><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th>Date verified</th><th>Date received</th><th class="num">PO amount (RM)</th><th>Remark</th><th></th></tr></thead>
-          <tbody>${rows.length ? rows.map((r) => `<tr><td>${r.reportId ? '<span class="pill done">SAVED</span>' : '<span class="pill pend">PENDING</span>'}</td><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td>${r.reportId ? '' : `<span style="white-space:nowrap"><button type="button" class="mini" data-pedit="${r.id}">Edit</button> <button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button></span>`}</td></tr>`).join('') : `<tr><td colspan="11" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No POs pushed yet.'}</td></tr>`}</tbody>
+          <thead><tr><th>Pushed</th><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th>Date verified</th><th>Date received</th><th class="num">PO amount (RM)</th><th>Remark</th><th></th></tr></thead>
+          <tbody>${rows.length ? rows.map((r) => `<tr><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td><span style="white-space:nowrap"><button type="button" class="mini" data-pedit="${r.id}">Edit</button> <button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button></span></td></tr>`).join('') : `<tr><td colspan="10" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No pending POs. Saved POs are in Submitted Summary Report.'}</td></tr>`}</tbody>
         </table></div>
       </section>`;
     poEl.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
@@ -1209,6 +1220,42 @@ select.field { appearance: auto; }
     }));
   }
 
+  /* ----- popup after "Save entry & Print": how much each budget category grew ----- */
+  function printSaved(html) {
+    let pa = $('printArea'); if (!pa) { pa = document.createElement('div'); pa.id = 'printArea'; document.body.appendChild(pa); }
+    pa.innerHTML = html; document.body.dataset.pa = '1';
+    window.addEventListener('afterprint', () => { delete document.body.dataset.pa; pa.innerHTML = ''; }, { once: true });
+    window.print();
+  }
+  function showSaved(j, rep, rows, outlet) {
+    const old = $('poModal'); if (old) old.remove();
+    const total = rows.reduce((t, r) => t + r.amount, 0);
+    const pct = (v, l) => (l > 0 ? (v / l) * 100 : 0);
+    const over = j.categories.filter((c) => c.over);
+    const m = document.createElement('div'); m.id = 'poModal'; m.className = 'modal-back';
+    m.innerHTML = `<div class="modal-card wide" role="dialog" aria-modal="true" aria-label="Report saved">
+      <h2>✓ Report saved - budget updated</h2>
+      <p class="sub2">${esc(repLabel(rep.code))} report · ${j.saved} PO${j.saved === 1 ? '' : 's'} · RM <b>${f2.format(total)}</b> added to ${esc(cycleName(j.cycle))}</p>
+      ${over.length ? `<div class="rptmsg warn" style="margin:12px 0 0"><b>Over limit:</b> ${over.map((c) => `${esc(c.category)} by RM ${f2.format(c.received - c.limit)}`).join(', ')}</div>` : ''}
+      <div class="poscroll" style="margin-top:12px"><table class="potable grow">
+        <thead><tr><th>Budget category</th><th class="num">Limit</th><th class="num">Before</th><th class="num">Added</th><th class="num">After</th><th class="barcol">Budget used</th></tr></thead>
+        <tbody>${j.categories.map((c) => {
+          const pb = pct(c.before, c.limit), pa = pct(c.received, c.limit);
+          const wb = Math.min(pb, 100), wa = Math.max(0, Math.min(pa, 100) - wb);
+          return `<tr class="${c.over ? 'ov' : ''}"><td><b>${esc(c.category)}</b><div class="sub2">${esc(c.department || '')}</div></td><td class="num">${f2.format(c.limit)}</td><td class="num">${f2.format(c.before)}</td><td class="num"><b>+${f2.format(c.added)}</b></td><td class="num"><b>${f2.format(c.received)}</b></td>
+            <td class="barcol"><div class="gbar" role="img" aria-label="${pb.toFixed(1)} percent before, ${pa.toFixed(1)} percent after"><i class="b" style="width:${wb}%"></i><i class="a" style="width:${wa}%"></i></div><div class="sub2">${pb.toFixed(1)}% → <b>${pa.toFixed(1)}%</b>${c.over ? ' · OVER' : ''}</div></td></tr>`;
+        }).join('')}</tbody></table></div>
+      <p class="sub2" style="margin-top:10px">The report is saved. Press Print to print it, or find it later in Submitted Summary Report.</p>
+      <div class="pobtns"><button type="button" class="sbtn primary" id="svPrint">Print report</button><button type="button" class="sbtn" id="svClose">Close</button></div></div>`;
+    document.body.appendChild(m);
+    const close = () => { m.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    $('svClose').onclick = close;
+    $('svPrint').onclick = () => printSaved(paperHtml(rep, j.date, outlet, rows));
+    $('svPrint').focus();
+  }
+
   /* ----- shared printable form (same layout as the sample SUMMARY_PO sheets) ----- */
   const repLabel = (c) => (c === 'FROZEN/RTD' ? 'Frozen/RTD' : c[0] + c.slice(1).toLowerCase());
   function paperHtml(rep, dateIso, outlet, rows) {
@@ -1253,7 +1300,7 @@ select.field { appearance: auto; }
         <div><label>Report</label><div class="tabs2" role="group" aria-label="Report">${d.reports.map((x) => `<button type="button" data-rep="${esc(x.code)}" aria-pressed="${x.code === rep.code}">${esc(repLabel(x.code))} (${count(x.code)})</button>`).join('')}</div></div>
         <button type="button" class="sbtn primary" id="rSave" ${picked.length ? '' : 'disabled'}>Save entry &amp; Print</button>
       </div>
-      <div class="subtle-row nopr"><span><b>${picked.length}</b> of ${mine.length} PO${mine.length === 1 ? '' : 's'} ticked · RM <b>${f2.format(total)}</b></span><span>Untick a PO to leave it for a later report. Saving adds each ticked PO amount to its category budget, then prints.</span></div>
+      <div class="subtle-row nopr"><span><b>${picked.length}</b> of ${mine.length} PO${mine.length === 1 ? '' : 's'} ticked · RM <b>${f2.format(total)}</b></span><span>Untick a PO to leave it for a later report. Saving adds each ticked PO amount to its category budget and shows how the budgets grow.</span></div>
       <section class="card nopr pocard" aria-label="Choose POs">
         <div class="poscroll"><table class="potable"><thead><tr><th style="width:34px"><input type="checkbox" id="ckAll" ${mine.length && picked.length === mine.length ? 'checked' : ''} ${mine.length ? '' : 'disabled'} aria-label="Select all"></th><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="num">PO amount (RM)</th></tr></thead>
         <tbody>${mine.length ? mine.map((r) => `<tr class="${R.sel.has(r.id) ? 'sel' : ''}"><td><input type="checkbox" data-id="${r.id}" ${R.sel.has(r.id) ? 'checked' : ''} aria-label="Include ${esc(r.poNo)}"></td><td><b>${esc(r.poNo)}</b></td><td>${esc(r.supplier)}</td><td>${esc(r.category)}</td><td>${esc(r.brand)}</td><td class="num">${f2.format(r.amount)}</td></tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);padding:18px">No pending POs for this report.</td></tr>'}</tbody></table></div>
@@ -1264,18 +1311,14 @@ select.field { appearance: auto; }
     const all = $('ckAll'); if (all) all.onchange = () => { mine.forEach((r) => (all.checked ? R.sel.add(r.id) : R.sel.delete(r.id))); renderRpt(); };
     $('rSave').onclick = async () => {
       const ids = picked.map((r) => r.id);
-      if (!confirm(`Save ${ids.length} PO${ids.length === 1 ? '' : 's'} (RM ${f2.format(total)}) in the ${repLabel(rep.code)} report?\n\nThis adds the amounts to the category budgets and cannot be undone here. The report will then print.`)) return;
+      if (!confirm(`Save ${ids.length} PO${ids.length === 1 ? '' : 's'} (RM ${f2.format(total)}) in the ${repLabel(rep.code)} report?\n\nThis adds the amounts to the category budgets. A summary will then show how each budget grows, with a Print button.`)) return;
       const btn = $('rSave'); btn.disabled = true; btn.textContent = 'Saving…';
       try {
         const j = await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', report: rep.code, ids }) });
-        const over = j.categories.filter((c) => c.over);
-        R.msg = { warn: over.length > 0, html: `Saved ${j.saved} PO${j.saved === 1 ? '' : 's'} in the ${esc(repLabel(rep.code))} report. Budgets updated.${over.length ? ' <b>Over limit:</b> ' + over.map((c) => `${esc(c.category)} (${f2.format(c.received)} of ${f2.format(c.limit)})`).join(', ') + '.' : ''} You can print it again later from Submitted Summary Report.` };
-        S.data = null; P.rows = null;
-        const done = () => { R.data.rows = R.data.rows.filter((r) => !ids.includes(r.id)); ids.forEach((i) => R.sel.delete(i)); renderRpt(); };
-        let fired = false; const after = () => { if (!fired) { fired = true; done(); } };
-        window.addEventListener('afterprint', after, { once: true });
-        window.print();
-        setTimeout(after, 1500);                                       // browsers that do not fire afterprint
+        S.data = null; P.rows = null; R.msg = null;
+        const savedRows = picked.slice();
+        R.data.rows = R.data.rows.filter((r) => !ids.includes(r.id)); ids.forEach((i) => R.sel.delete(i)); renderRpt();
+        showSaved(j, rep, savedRows, d.outlet);
       } catch (err) {
         if (err.auth) return;
         R.msg = { warn: true, html: esc(err.message) }; await rptLoad(true);
@@ -1382,7 +1425,7 @@ select.field { appearance: auto; }
 
   // "1/2, 2/2" at the bottom right, only when the printed report runs to more than one A4 portrait page
   window.addEventListener('beforeprint', () => {
-    const paper = document.querySelector('main:not([hidden]) .paper'); if (!paper) return;
+    const paper = document.querySelector('#printArea .paper') || document.querySelector('main:not([hidden]) .paper'); if (!paper) return;
     const host = document.createElement('div');
     host.style.cssText = 'position:absolute;left:-9999px;top:0;width:190mm;';
     const c = paper.cloneNode(true); c.classList.add('pm'); host.appendChild(c); document.body.appendChild(host);
