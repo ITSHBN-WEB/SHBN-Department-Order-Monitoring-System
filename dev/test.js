@@ -19,6 +19,7 @@ const call = (handler, { method = 'GET', query = {}, body, as = '1008-SHBN', coo
       setHeader(k, v) { this.headers[k] = v; },
       status(c) { this.code = c; return this; },
       json(o) { resolve({ code: this.code, body: o, headers: this.headers }); },
+      end() { resolve({ code: this.code, body: null, headers: this.headers }); },
     };
     handler({ method, query, body, headers: { cookie: cookie ?? (as ? cookieFor(as) : '') } }, res);
   });
@@ -398,6 +399,149 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   // view-only: cannot submit
   r = await asAcct(CA, { value: 5 });
   assert.equal(r.code, 403);
+}
+
+// --- Push to DOMS: bookmark token, popup check, PO save, reports ----------------------------------------------------
+{
+  const { default: po } = await import('../api/po.js');
+  const { default: poPush } = await import('../api/po-push.js');
+  const { default: admin2 } = await import('../api/admin.js');
+  const CA = 'CENTRAL-ADMIN';
+  // the 32 PO categories from the workbook are loaded and each points at a real DOMS budget category
+  const pcs = await sql`select p.id, p.name, p.report, p.attn, c.name as cat from po_categories p join categories c on c.id = p.category_id order by p.sort_order`;
+  assert.equal(pcs.length, 32);
+  assert.deepEqual([...new Set(pcs.map((x) => x.report))], ['FOOD', 'FROZEN/RTD', 'NONFOOD']);
+  const rtd = pcs.find((x) => x.name === 'READY TO DRINKS'), bev = pcs.find((x) => x.name === 'BEVERAGES');
+  assert.deepEqual([rtd.cat, rtd.report, rtd.attn, bev.cat, bev.report, bev.attn], ['BEVERAGES', 'FROZEN/RTD', 'MR SALLEH', 'BEVERAGES', 'FOOD', 'MS LIZA']);   // beverages counts once, prints on two reports
+
+  // only 1008-SHBN may use it (test run)
+  for (const code of ['1015-SHPL', '1007-SHPP', CA]) assert.equal((await call(po, { as: code })).code, 403, code);
+  assert.equal((await call(po, { as: null })).code, 401);
+  r = await call(po);
+  assert.deepEqual([r.code, r.body.hasToken, r.body.rows.length], [200, false, 0]);
+  r = await call(po, { method: 'POST', body: { action: 'token' } });
+  assert.equal(r.code, 200);
+  const token = r.body.token;
+  assert.ok(token.length >= 30);
+  assert.equal((await sql`select count(*)::int n from push_tokens where token_hash = ${token}`)[0].n, 0);   // only a hash is stored
+  assert.equal((await call(po)).body.hasToken, true);
+  assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'token' } })).code, 403);
+
+  // the popup's pre-check: bad / missing token is refused, CORS lets the portal page read the answer, no cookie needed
+  const push = (b, method = 'POST') => call(poPush, { method, as: null, body: typeof b === 'string' ? b : JSON.stringify(b) });
+  const check = (po_no, k = token) => call(poPush, { as: null, query: { k, po: po_no } });
+  assert.equal((await check('HQ01962198', 'x'.repeat(32))).code, 401);
+  assert.equal((await call(poPush, { as: null, query: {} })).code, 401);
+  assert.equal((await call(poPush, { method: 'OPTIONS', as: null })).code, 204);
+  r = await check('HQ01962198');
+  assert.equal(r.headers['Access-Control-Allow-Origin'], '*');
+  assert.deepEqual([r.code, r.body.categories.length, r.body.duplicate], [200, 32, null]);
+
+  const PO = { po_no: 'HQ01962198', reference: 'SPO000002009598-LIFE', supplier: 'CHOON HUA BORNEO SDN. BHD.', date_received: '2026-11-10', date_verified: '2026-11-23T04:48:22.000', amount: '1,960.50' };
+  const bevRecv = async (as = '1008-SHBN') => (await call(dashboard, { as })).body.categories.find((c) => c.name === 'BEVERAGES').received;
+  const before = await bevRecv();
+  // invalid input is refused and nothing is saved
+  for (const bad of [{ ...PO, po_no: '' }, { ...PO, supplier: ' ' }, { ...PO, amount: '0' }, { ...PO, amount: 'abc' }]) {
+    assert.equal((await push({ k: token, po: bad, poCategoryId: rtd.id })).code, 400, JSON.stringify(bad));
+  }
+  assert.equal((await push({ k: token, po: PO, poCategoryId: 99999 })).code, 400);
+  assert.equal((await push({ k: token, po: PO })).code, 400);
+  assert.equal((await push('not json')).code, 401);
+  assert.equal((await sql`select count(*)::int n from purchase_orders`)[0].n, 0);
+
+  // a good push is only PENDING: stored with the user's category / brand / remark, budget and recent activity untouched
+  r = await push({ k: token, po: PO, poCategoryId: rtd.id, brand: 'life', remark: ' urgent ' });
+  assert.deepEqual([r.code, r.body.poNo, r.body.category, r.body.report], [201, 'HQ01962198', 'READY TO DRINKS', 'FROZEN/RTD']);
+  const saved = (await sql`select p.*, p.amount::float8 as amt from purchase_orders p where p.po_no = 'HQ01962198'`)[0];
+  assert.deepEqual([saved.account, saved.amt, saved.brand, saved.remark, saved.reference, saved.supplier, saved.entry_id, saved.report_id], ['1008-SHBN', 1960.5, 'LIFE', 'URGENT', 'SPO000002009598-LIFE', 'CHOON HUA BORNEO SDN. BHD.', null, null]);
+  assert.equal(await bevRecv(), before);
+  assert.equal((await call(dashboard)).body.recent.some((x) => x.submittedBy === 'PO HQ01962198'), false);
+
+  // the same PO again: blocked in the popup pre-check and on push
+  r = await check('HQ01962198');
+  assert.deepEqual([r.body.duplicate.po_no, r.body.duplicate.category, r.body.duplicate.brand, r.body.duplicate.ts > 0], ['HQ01962198', 'READY TO DRINKS', 'LIFE', true]);
+  r = await push({ k: token, po: PO, poCategoryId: bev.id });
+  assert.deepEqual([r.code, r.body.code, r.body.duplicate.category], [409, 'duplicate', 'READY TO DRINKS']);
+  // ...even when two people push the same new PO at the same moment: exactly one wins
+  const PO2 = { ...PO, po_no: 'HQ01964261', reference: 'SPO000002011712-REX', supplier: 'TRANS-BORNEO MARKETING SDN.BHD. (KK)', amount: '1230.00', date_received: '2026-12-11', date_verified: '2026-11-20T03:19:20.00' };
+  const both = await Promise.all([push({ k: token, po: PO2, poCategoryId: bev.id }), push({ k: token, po: PO2, poCategoryId: bev.id })]);
+  assert.deepEqual(both.map((x) => x.code).sort(), [201, 409]);
+  assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01964261'`)[0].n, 1);
+  const pet = pcs.find((x) => x.name === 'PET FOOD'), rice = pcs.find((x) => x.name === 'RICE');
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940, date_received: '2026-11-20' }, poCategoryId: pet.id, brand: 'MONAS' })).code, 201);   // no verified date is allowed
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 500 }, poCategoryId: pet.id, brand: 'ABC' })).code, 201);
+  assert.equal(await bevRecv(), before);                                                  // five pushes later the budget still has not moved
+
+  // PO Entry list
+  r = await call(po);
+  assert.deepEqual(r.body.rows.map((x) => [x.poNo, x.reportId]), [['HQ01970001', null], ['HQ01970000', null], ['HQ01964261', null], ['HQ01962198', null]]);
+  assert.deepEqual([r.body.rows[3].category, r.body.rows[3].report, r.body.rows[3].dateVerified, r.body.rows[3].dateReceived, r.body.rows[3].amount], ['READY TO DRINKS', 'FROZEN/RTD', '2026-11-23', '2026-11-10', 1960.5]);
+
+  // PO Summary Report (preview of pending POs): grouped for the three reports, in the workbook's category order
+  r = await call(po, { query: { view: 'pending' } });
+  assert.deepEqual([r.body.outlet, r.body.reports.map((x) => [x.code, x.title, x.attn])], ['SEGSHBN', [['FOOD', 'FOOD DEPT', 'MS LIZA'], ['FROZEN/RTD', 'FROZEN/RTD DEPT', 'MR SALLEH'], ['NONFOOD', 'NONFOOD DEPT', 'MS MARLIN']]]);
+  assert.deepEqual(r.body.rows.map((x) => [x.category, x.report, x.poNo]), [['BEVERAGES', 'FOOD', 'HQ01964261'], ['READY TO DRINKS', 'FROZEN/RTD', 'HQ01962198'], ['PET FOOD', 'NONFOOD', 'HQ01970000'], ['PET FOOD', 'NONFOOD', 'HQ01970001']]);
+  assert.equal((await call(po, { as: '1015-SHPL', query: { view: 'pending' } })).code, 403);
+  const idOf = Object.fromEntries(r.body.rows.map((x) => [x.poNo, x.id]));
+
+  // Save entry: validation
+  const submit = (body, as = '1008-SHBN') => call(po, { method: 'POST', as, body: { action: 'submit', ...body } });
+  assert.equal((await submit({ report: 'NOPE', ids: [idOf.HQ01964261] })).code, 400);
+  assert.equal((await submit({ report: 'FOOD', ids: [] })).code, 400);
+  assert.equal((await submit({ report: 'FOOD', ids: [idOf.HQ01962198] })).code, 409);     // a FROZEN/RTD PO cannot be saved into the FOOD report
+  assert.equal((await submit({ report: 'FOOD', ids: [idOf.HQ01964261] }, '1015-SHPL')).code, 403);
+  assert.equal(await bevRecv(), before);
+
+  // Save entry for FROZEN/RTD (one PO) + NONFOOD (only one of two ticked): the budget changes only now
+  r = await submit({ report: 'FROZEN/RTD', ids: [idOf.HQ01962198] });
+  assert.deepEqual([r.code, r.body.saved, r.body.categories.map((c) => c.category)], [200, 1, ['BEVERAGES']]);
+  assert.equal(await bevRecv(), before + 1960.5);
+  const rep1 = r.body.reportId;
+  const row1 = (await sql`select p.report_id::int rid, p.entry_id, e.value::float8 ev, e.submitted_by eby, e.account eacct, e.cycle_no ec, c.name cn from purchase_orders p join entries e on e.id = p.entry_id join categories c on c.id = e.category_id where p.po_no = 'HQ01962198'`)[0];
+  assert.deepEqual([row1.rid, row1.ev, row1.eby, row1.eacct, row1.cn], [rep1, 1960.5, 'PO HQ01962198', '1008-SHBN', 'BEVERAGES']);
+  assert.equal((await call(dashboard)).body.recent[0].submittedBy, 'PO HQ01962198');
+  assert.equal(await bevRecv('1015-SHPL'), 0);                                            // other accounts see nothing
+  // saving the same PO twice (also two people at once) never doubles the budget
+  assert.equal((await submit({ report: 'FROZEN/RTD', ids: [idOf.HQ01962198] })).code, 409);
+  assert.equal(await bevRecv(), before + 1960.5);
+  const pet0 = (await call(dashboard)).body.categories.find((c) => c.name === 'PET FOOD').received;
+  const two = await Promise.all([submit({ report: 'NONFOOD', ids: [idOf.HQ01970000] }), submit({ report: 'NONFOOD', ids: [idOf.HQ01970000] })]);
+  assert.deepEqual(two.map((x) => x.code).sort(), [200, 409]);
+  assert.equal((await call(dashboard)).body.categories.find((c) => c.name === 'PET FOOD').received, pet0 + 940);
+  assert.equal((await sql`select count(*)::int n from entries where submitted_by = 'PO HQ01970000'`)[0].n, 1);
+  // the un-ticked PO stays pending; the saved ones leave the preview
+  r = await call(po, { query: { view: 'pending' } });
+  assert.deepEqual(r.body.rows.map((x) => x.poNo), ['HQ01964261', 'HQ01970001']);
+  // a pending PO can be removed (pushed by mistake) and pushed again; a saved one cannot be removed
+  const dis = (id) => call(po, { method: 'POST', body: { action: 'discard', id } });
+  assert.equal((await dis(idOf.HQ01962198)).code, 409);
+  assert.equal((await dis(idOf.HQ01970001)).code, 200);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 510 }, poCategoryId: pet.id })).code, 201);
+  assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'discard', id: idOf.HQ01964261 } })).code, 403);
+
+  // Submitted Summary Report: saved reports by date range and by report; PO list statuses
+  r = await call(po, { query: { view: 'submitted' } });
+  assert.deepEqual(r.body.saved.map((x) => [x.report, x.count, x.total, x.date === r.body.today]), [['NONFOOD', 1, 940, true], ['FROZEN/RTD', 1, 1960.5, true]]);
+  assert.deepEqual(r.body.rows.map((x) => [x.reportId === r.body.saved[0].id, x.poNo]).sort().map((x) => x[1]), ['HQ01962198', 'HQ01970000']);
+  assert.equal((await call(po, { query: { view: 'submitted', from: '2020-01-01', to: '2020-01-02' } })).body.saved.length, 0);
+  assert.equal((await call(po, { as: '1015-SHPL', query: { view: 'submitted' } })).code, 403);
+  r = await call(po);
+  assert.deepEqual(r.body.rows.map((x) => [x.poNo, x.reportId !== null]), [['HQ01970001', false], ['HQ01970000', true], ['HQ01964261', false], ['HQ01962198', true]]);
+
+  // Central Admin edits / deletes a saved budget entry: the PO follows (amount synced, PO removed on delete so it can be pushed again)
+  const e1 = (await sql`select entry_id::int id from purchase_orders where po_no = 'HQ01962198'`)[0].id;
+  const e2 = (await sql`select entry_id::int id from purchase_orders where po_no = 'HQ01970000'`)[0].id;
+  const bevId = (await sql`select id from categories where name = 'BEVERAGES'`)[0].id;
+  r = await call(admin2, { method: 'POST', as: CA, body: { action: 'save', updates: [{ id: e1, categoryId: bevId, value: 2000, submittedBy: 'PO HQ01962198' }], deletes: [e2] } });
+  assert.deepEqual([r.code, r.body.updated, r.body.deleted], [200, 1, 1]);
+  assert.equal((await sql`select amount::float8 a from purchase_orders where po_no = 'HQ01962198'`)[0].a, 2000);
+  assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01970000'`)[0].n, 0);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940 }, poCategoryId: pet.id })).code, 201);   // can be pushed again
+
+  // creating a new bookmark invalidates the old one
+  r = await call(po, { method: 'POST', body: { action: 'token' } });
+  assert.equal((await check('HQ09999999', token)).code, 401);
+  assert.equal((await check('HQ09999999', r.body.token)).code, 200);
 }
 
 // --- Upgrading an existing (pre-accounts) database keeps its entries and gives them to 1008-SHBN ---------------

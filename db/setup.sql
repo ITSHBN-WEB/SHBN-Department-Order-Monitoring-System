@@ -222,3 +222,63 @@ join categories c on c.department = v.department and c.name = v.name
 on conflict (account, category_id) do update set limit_value = excluded.limit_value;
 
 insert into settings (key, value) values ('limits_v2', '1') on conflict (key) do nothing;   -- see lib/db.js
+
+-- Push to DOMS (PO Entry / PO Summary Report): bookmark tokens, PO categories, pushed purchase orders
+create table if not exists push_tokens (account text primary key references accounts(code), token_hash text not null, created_at timestamptz not null default now());
+create table if not exists po_categories (
+  id serial primary key, name text not null unique, category_id int not null references categories(id),
+  report text not null, attn text not null, sort_order int not null);
+insert into po_categories (name, category_id, report, attn, sort_order)
+select v.name, c.id, v.report, v.attn, v.ord
+from (values
+  ('BEVERAGES', 'BEVERAGES', 'FOOD', 'MS LIZA', 1),
+  ('READY TO DRINKS', 'BEVERAGES', 'FROZEN/RTD', 'MR SALLEH', 2),
+  ('CONFECTIONERY', 'CONFECTIONERY', 'FOOD', 'MS LIZA', 3),
+  ('RICE', 'RICE', 'FOOD', 'MS LIZA', 4),
+  ('CONDIMENTS / SEASONINGS', 'CONDIMENTS / SEASONINGS', 'FOOD', 'MS LIZA', 5),
+  ('MILK POWDER', 'MILK POWDER', 'FOOD', 'MS LIZA', 6),
+  ('NOODLES / PORRIDGE / PASTA', 'NOODLES / PORRIDGE / PASTA', 'FOOD', 'MS LIZA', 7),
+  ('CANNED & BOTTLED FOODS', 'CANNED & BOTTLED FOODS', 'FOOD', 'MS LIZA', 8),
+  ('COOKING OIL', 'COOKING OIL', 'FOOD', 'MS LIZA', 9),
+  ('BAKING NEEDS', 'BAKING NEEDS', 'FOOD', 'MS LIZA', 10),
+  ('BAKERY', 'BAKERY', 'FOOD', 'MS LIZA', 11),
+  ('BREAKFAST FOODS & SPREAD', 'BREAKFAST FOODS & SPREAD', 'FOOD', 'MS LIZA', 12),
+  ('ORGANIC', 'ORGANIC', 'FOOD', 'MS LIZA', 13),
+  ('FROZEN / CHILL / DAIRY', 'FROZEN / CHILL / DAIRY', 'FROZEN/RTD', 'MR SALLEH', 14),
+  ('MEAT & POULTRY', 'MEAT & POULTRY', 'FROZEN/RTD', 'MR SALLEH', 15),
+  ('VEGETABLES', 'VEGETABLES', 'FROZEN/RTD', 'MR SALLEH', 16),
+  ('FRUITS', 'FRUITS', 'FROZEN/RTD', 'MR SALLEH', 17),
+  ('DRIED FOOD', 'DRIED FOOD', 'FROZEN/RTD', 'MR SALLEH', 18),
+  ('PREPACKED FOOD', 'PREPACKED FOOD', 'FROZEN/RTD', 'MR SALLEH', 19),
+  ('ALCOHOLIC DRINKS', 'ALCOHOLIC DRINKS', 'FROZEN/RTD', 'MR SALLEH', 20),
+  ('BABY CARE', 'BABY CARE', 'NONFOOD', 'MS MARLIN', 21),
+  ('BODY CARE', 'BODY CARE', 'NONFOOD', 'MS MARLIN', 22),
+  ('DENTAL CARE', 'DENTAL CARE', 'NONFOOD', 'MS MARLIN', 23),
+  ('HAIR CARE', 'HAIR CARE', 'NONFOOD', 'MS MARLIN', 24),
+  ('SANITARY & DIAPERS', 'SANITARY & DIAPERS', 'NONFOOD', 'MS MARLIN', 25),
+  ('PAPER PRODUCT', 'PAPER PRODUCT', 'NONFOOD', 'MS MARLIN', 26),
+  ('FACIAL CARE & COSMETICS', 'FACIAL CARE & COSMETICS', 'NONFOOD', 'MS MARLIN', 27),
+  ('AIR FRESHENERS', 'AIR FRESHENERS', 'NONFOOD', 'MS MARLIN', 28),
+  ('HEALTH FOOD / MEDICINE / FIRST AID', 'HEALTH FOOD / MEDICINE / FIRST AID', 'NONFOOD', 'MS MARLIN', 29),
+  ('PET FOOD', 'PET FOOD', 'NONFOOD', 'MS MARLIN', 30),
+  ('TOBACCO / MAGAZINE & NEWSPAPER', 'TOBACCO / MAGAZINE & NEWSPAPER', 'NONFOOD', 'MS MARLIN', 31),
+  ('BATTERY / LIGHT SOURCE', 'BATTERY / LIGHT SOURCE', 'NONFOOD', 'MS MARLIN', 32)
+) as v(name, cat, report, attn, ord)
+join categories c on c.name = v.cat
+on conflict (name) do nothing;
+create table if not exists po_reports (
+  id bigserial primary key, account text not null references accounts(code), report text not null,
+  saved_at timestamptz not null default now(), report_date date not null, cycle_no int not null,
+  po_count int not null, total numeric(14,2) not null);
+create table if not exists purchase_orders (
+  id bigserial primary key, account text not null references accounts(code), po_no text not null, reference text not null default '',
+  supplier text not null, date_received date, date_verified date, amount numeric(14,2) not null check (amount > 0),
+  po_category_id int not null references po_categories(id), brand text not null default '', remark text not null default '',
+  entry_id bigint references entries(id) on delete cascade, cycle_no int, report_id bigint references po_reports(id),
+  pushed_at timestamptz not null default now(), unique (account, po_no));
+alter table purchase_orders alter column entry_id drop not null;
+alter table purchase_orders alter column cycle_no drop not null;
+alter table purchase_orders add column if not exists report_id bigint references po_reports(id);
+create index if not exists po_reports_saved_idx on po_reports (account, saved_at);
+create index if not exists purchase_orders_report_idx on purchase_orders (report_id);
+create index if not exists purchase_orders_pushed_idx on purchase_orders (account, pushed_at);

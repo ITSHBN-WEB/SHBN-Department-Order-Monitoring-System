@@ -1,7 +1,7 @@
 # DOMS – Department Order Monitoring System
 
 Tracks stock value received per category against its limit, in repeating 45-day cycles.
-Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) · **GitHub**.
+Stack: **Neon** (Postgres) · **Vercel** (static page + 4 serverless functions) · **GitHub**.
 
 - Live tracking starts **01/11/2026**; cycle 1 = 01/11/2026 – 15/12/2026, cycle 2 starts 16/12/2026, and so on (automatic).
 - Cycle length and start date live in the `settings` table (see "Changing settings").
@@ -38,20 +38,54 @@ Stack: **Neon** (Postgres) · **Vercel** (static page + 2 serverless functions) 
 ## Accounts and sign-in
 
 - Three accounts: **1008-SHBN**, **1015-SHPL**, **1007-SHPP**. Everyone signs in on the first screen with their account code and password.
-- A fourth account, **CENTRAL-ADMIN**, is view-only: it sees all three accounts' data on the Dashboard (combined, or one account via the dropdown) and cannot submit entries. Its Admin tab works with the head-office password only. It has no limits or entries of its own.
-- **Each account's data is completely separate**: its own entries, totals, recent activity and Admin list, tracked against **its own category limits** (see below). All accounts share the same cycle dates.
+- A fourth account, **CENTRAL-ADMIN**, sees all three accounts' data and cannot submit entries (see "Central Admin" below). It has no limits or entries of its own, and it is the only account that can edit or delete entries (Record Adjustments tab).
+- **Each account's data is completely separate**: its own entries, totals, recent activity, tracked against **its own category limits** (see below). All accounts share the same cycle dates.
 - Passwords are stored only as salted hashes (never in plain text, never in this repo). The sign-in lasts 12 hours or until **Log out** (which also forgets the remembered name).
 - Existing entries made before accounts existed are assigned to **1008-SHBN** automatically (once, on the first start after deploying).
 - Change a password: `node scripts/hash-password.js "NewPassword"` prints the hash and the SQL to run in the Neon SQL Editor.
 - Optional: set `SESSION_SECRET` in Vercel to use your own session-signing key (otherwise one is derived from `DATABASE_URL`).
 
-## Admin tab (edit / delete entries)
+## Record Adjustments tab (edit / delete entries)
 
 - Sidebar -> **Record Adjustments**. This tab exists **only for the Central Admin account**: no other account sees it, and the server refuses its requests from anyone else. No extra password is asked.
 - Central Admin can edit/delete entries of **all** accounts (Account filter and column; an entry's account itself cannot be changed).
 - Flow: pick the **Period (cycle)** -> filter by **Account** and/or **Department** -> optionally a **Category** -> **Edit** (category, value, submitted by) or **Delete** a row -> press **Save changes**.
 - Edits and deletions are staged first (rows are highlighted, **Undo** is available) and only written when you press Save. All changes are saved together, all-or-nothing.
 - Edited entries show an "Edited" tag. Every edit/delete is also written to the `adjustments` table (before/after values) and shown in the **Recent Activity** box at the right of the tab.
+
+## Dashboard features
+
+- **New Entry:** pick a category (department fills in automatically), enter **Value** and **Submitted By**. The Value box accepts numbers only, adds thousands commas while typing and pads to 2 decimals when you leave it (`1` -> `1.00`, `9120` -> `9,120.00`). **Clear** empties the form and forgets the saved name.
+- **Over budget summary:** a red box under the total cards lists every category that has passed its limit (amount over and %). Shown for every account.
+- **Header badge:** animated holographic DOMS logo (pure SVG/CSS, respects reduced-motion).
+
+## Central Admin
+
+- Sign in as **CENTRAL-ADMIN**. The right-hand panel shows **Filters** instead of Recent Activity:
+  - **Account:** All accounts, or one account.
+  - **Department** and **Category:** tick several to compare. Totals follow the ticks.
+- With **All accounts**, nothing is added together: each category lists the three accounts one under the other (1008-SHBN, 1007-SHPP, 1015-SHPL), each with its own bar, received / limit and status. The top cards show one card per account.
+
+## Push to DOMS (PO Entry + PO Summary Report) – test run, 1008-SHBN only
+Only the 1008-SHBN account sees the **PO Entry**, **PO Summary Report** and **Submitted Summary Report** tabs (under Dashboard). Other accounts and Central Admin do not.
+
+**Set up the bookmark (once per browser)**
+1. PO Entry tab > **Create my bookmark**, then drag the **Push to DOMS** button to the bookmarks bar.
+2. Creating a new bookmark stops the old one working. The bookmark contains a private token (like a password): do not share it.
+
+**Use it**
+1. On the portal open the PO detail page (View PO Detail) and click the bookmark.
+2. A popup shows what was read: PO No, Supplier (the box after the supplier code), PO Date > Date Received PO, Posted By / Date (date only) > Date Verified PO, Grand Total (RM) > PO Amount.
+3. Choose the **Category**, check the **Brand**, add a **Remark** (optional), then **Send to DOMS**. A PO No already in DOMS is blocked.
+4. The pushed PO is **PENDING**: it does not change any budget. It shows in **PO Entry** (a pending PO can be removed and pushed again).
+5. **PO Summary Report** tab: pick Food, Frozen/RTD or Nonfood to preview the pending POs on the printable form. Untick any PO to leave it for a later report, then press **Save entry & Print**. Saving adds each ticked PO amount to its category budget (current cycle, visible in the Dashboard and Recent Activity) and prints the report. The saved POs leave the preview.
+6. **Submitted Summary Report** tab: every saved report, filtered by saved date range (default last 30 days) and by report (All / Food / Frozen/RTD / Nonfood). Press View / Print to open one and print it again.
+
+Each report has its own Attn To, Department and PO categories (BEVERAGES is on Food, READY TO DRINKS on Frozen/RTD; both count to the BEVERAGES budget). The form prints A4 landscape and shows the portal PO No.
+If the popup says a field was "not found", the portal page layout differs from what the bookmark expects: send a screenshot and the readers can be adjusted.
+
+Editing a saved entry's value in Record Adjustments updates the PO amount; deleting it also removes the PO from the saved report (so it can be pushed again).
+New tables are created automatically on the first request after deploy (db/setup.sql also contains them).
 
 ## Deploy (once)
 
@@ -83,11 +117,11 @@ Re-running `db/setup.sql` is safe (it is not required after updating the code: t
 ## Layout
 
 ```
-public/index.html   the whole UI (sidebar, dashboard, New Entry, Recent Activity)
+public/index.html   the whole UI (sidebar, dashboard, New Entry, Recent Activity, Central Admin filters, Record Adjustments)
 api/dashboard.js    GET  – categories, totals, recent activity, cycle info
 api/entries.js      POST – validate + save an entry
 api/auth.js         sign in / sign out / who am I
-api/admin.js        Admin tab API (account scope or head-office scope)
+api/admin.js        Record Adjustments API (Central Admin only) + adjustments log
 lib/                Neon connection + cycle maths
 db/setup.sql        tables + seed (categories, accounts, per-account limits) from Department_Value.xlsx
 dev/                local server and tests (not deployed)

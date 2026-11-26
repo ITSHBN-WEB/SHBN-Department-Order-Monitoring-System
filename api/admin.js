@@ -133,6 +133,11 @@ export default async function handler(req, res) {
             returning e.id
           ), del as (
             delete from entries where id = any(${deletes}::bigint[]) and (${hq}::boolean or account = ${acct}::text) returning id
+          ), po_sync as (
+            update purchase_orders p set amount = u.value
+            from unnest(${ids}::bigint[], ${vals}::numeric[]) as u(id, value)
+            where p.entry_id = u.id and u.id in (select id from upd) and u.value > 0
+            returning p.id
           ), log_edit as (
             insert into adjustments (by_account, action, entry_id, account, cycle_no, category, department, value, submitted_by, new_category, new_value, new_submitted_by)
             select ${acct}, 'edit', o.id, o.account, o.cycle_no, o.category, o.department, o.value, o.submitted_by, nc.name, u.value, u.submitted_by
