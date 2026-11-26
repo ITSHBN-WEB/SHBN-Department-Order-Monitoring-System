@@ -332,6 +332,13 @@ select.field { appearance: auto; }
 @media (max-width: 1180px) { .app.is-wide { grid-template-columns: 200px minmax(0, 1fr); } }
 @media (max-width: 820px) { .app.is-wide { grid-template-columns: 1fr; } }
 .app:not(.has-po) .nav a[data-view="po"], .app:not(.has-po) .nav a[data-view="poreport"], .app:not(.has-po) .nav a[data-view="posubmitted"] { display: none !important; }
+.modal-back { position: fixed; inset: 0; background: rgba(2,6,15,.62); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal-card { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; width: min(640px, 100%); max-height: 92vh; overflow: auto; }
+.modal-card h2 { margin: 0 0 4px; font-size: 16px; }
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 14px 0 6px; }
+.mgrid label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); } .mgrid .wide { grid-column: 1 / -1; }
+.mgrid input, .mgrid select { background: var(--bg, #0b1220); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font: inherit; font-size: 14px; }
+@media (max-width: 560px) { .mgrid { grid-template-columns: 1fr; } }
 .pocard { padding: 18px 20px; margin-bottom: 18px; }
 .pocard h2 { font-size: 15px; margin: 0 0 6px; }
 .pocard p { margin: 4px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
@@ -370,6 +377,7 @@ select.field { appearance: auto; }
 .paper th { background: #e9ecef; font-size: 11.5px; text-align: center; }
 .paper td.c { text-align: center; } .paper td.r { text-align: right; white-space: nowrap; }
 .paper tr.gap td { border: 0; padding: 6px 0; }
+.paper tr.tot td { padding-top: 6px; padding-bottom: 6px; }
 .paper .sign { display: flex; gap: 0; margin-top: 30px; font-weight: 700; break-inside: avoid; }
 .paper .sg { flex: 0 0 50%; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; white-space: nowrap; }
 .paper .sg .space { display: block; height: 34px; }
@@ -1058,7 +1066,7 @@ select.field { appearance: auto; }
 
   /* ---------------- PO Entry + PO Summary Report (Push to DOMS test run, 1008-SHBN) ---------------- */
   const poEl = $('poMain'), rptEl = $('rptMain');
-  const P = { rows: null, hasToken: false, q: '', loading: false, err: '' };
+  const P = { rows: null, cats: [], hasToken: false, q: '', loading: false, err: '' };
   const R = { data: null, report: 'FOOD', sel: new Set(), msg: null, err: '' };
   const S = { data: null, report: 'ALL', from: '', to: '', open: null, edit: null, err: '' };
   const subEl = $('subMain');
@@ -1078,7 +1086,7 @@ select.field { appearance: auto; }
 
   async function poEnter() {
     if (!P.rows) poEl.innerHTML = '<div class="skeleton">Loading…</div>';
-    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.hasToken = j.hasToken; P.err = ''; }
+    try { const j = await poApi('/api/po?view=list'); P.rows = j.rows; P.hasToken = j.hasToken; P.cats = j.categories; P.err = ''; }
     catch (err) { if (err.auth) return; P.err = err.message; }
     renderPo();
   }
@@ -1105,7 +1113,7 @@ select.field { appearance: auto; }
           <input class="field" id="poQ" type="search" placeholder="Search PO, supplier, brand…" value="${esc(P.q)}" style="max-width:260px"></div>
         <div class="poscroll"><table class="potable">
           <thead><tr><th>Status</th><th>Pushed</th><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th>Date verified</th><th>Date received</th><th class="num">PO amount (RM)</th><th>Remark</th><th></th></tr></thead>
-          <tbody>${rows.length ? rows.map((r) => `<tr><td>${r.reportId ? '<span class="pill done">SAVED</span>' : '<span class="pill pend">PENDING</span>'}</td><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td>${r.reportId ? '' : `<button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button>`}</td></tr>`).join('') : `<tr><td colspan="11" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No POs pushed yet.'}</td></tr>`}</tbody>
+          <tbody>${rows.length ? rows.map((r) => `<tr><td>${r.reportId ? '<span class="pill done">SAVED</span>' : '<span class="pill pend">PENDING</span>'}</td><td>${when(r.ts)}</td><td><b>${esc(r.poNo)}</b>${r.reference ? `<div class="sub2">${esc(r.reference)}</div>` : ''}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}<div class="sub2">${esc(r.report)}</div></td><td>${esc(r.brand)}</td><td>${dmySlash(r.dateVerified)}</td><td>${dmySlash(r.dateReceived)}</td><td class="num"><b>${f2.format(r.amount)}</b></td><td>${esc(r.remark)}</td><td>${r.reportId ? '' : `<span style="white-space:nowrap"><button type="button" class="mini" data-pedit="${r.id}">Edit</button> <button type="button" class="mini" data-del="${r.id}" data-po="${esc(r.poNo)}">Remove</button></span>`}</td></tr>`).join('') : `<tr><td colspan="11" style="color:var(--muted);padding:22px">${P.rows.length ? 'No match.' : 'No POs pushed yet.'}</td></tr>`}</tbody>
         </table></div>
       </section>`;
     const mk = $('tokMake') || $('tokReset');
@@ -1120,8 +1128,47 @@ select.field { appearance: auto; }
       try { await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discard', id: Number(b.dataset.del) }) }); R.data = null; await poEnter(); toast('PO removed.'); }
       catch (err) { if (!err.auth) { toast(err.message, true); poEnter(); } }
     }));
+    poEl.querySelectorAll('[data-pedit]').forEach((b) => (b.onclick = () => { const r = P.rows.find((x) => x.id === Number(b.dataset.pedit)); if (r) openPoEdit(r); }));
     const pl = $('pushLink'); if (pl) pl.onclick = (e) => { e.preventDefault(); toast('Drag this button to your bookmarks bar instead of clicking it.'); };
     const qi = $('poQ'); if (qi) qi.oninput = () => { P.q = qi.value; const pos = qi.selectionStart; renderPo(); const n = $('poQ'); n.focus(); n.setSelectionRange(pos, pos); };
+  }
+
+  // edit one pending PO in a small dialog (a PO already saved in a report is edited in Submitted Summary Report)
+  function openPoEdit(r) {
+    const old = $('poModal'); if (old) old.remove();
+    const groups = {};
+    (P.cats || []).forEach((c) => (groups[c.report] = groups[c.report] || []).push(c));
+    const m = document.createElement('div');
+    m.id = 'poModal'; m.className = 'modal-back';
+    m.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-label="Edit PO">
+      <h2>Edit PO ${esc(r.poNo)}</h2><p class="sub2">The PO No cannot be changed. This PO is still pending, so no budget changes yet.</p>
+      <div class="mgrid">
+        <label>Supplier<input id="mSup" value="${esc(r.supplier)}" maxlength="200"></label>
+        <label>Category<select id="mCat">${Object.keys(groups).map((g) => `<optgroup label="${esc(g)}">${groups[g].map((c) => `<option value="${c.id}" ${c.id === r.pcId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+        <label>Brand<input id="mBrand" value="${esc(r.brand)}" maxlength="100"></label>
+        <label>PO Amount (RM)<input id="mAmt" inputmode="decimal" value="${esc(f2.format(r.amount))}"></label>
+        <label>Date verified PO<input type="date" id="mDv" value="${esc(r.dateVerified || '')}"></label>
+        <label>Date received PO<input type="date" id="mDr" value="${esc(r.dateReceived || '')}"></label>
+        <label class="wide">Remark<input id="mRem" value="${esc(r.remark)}" maxlength="300"></label>
+      </div>
+      <div class="pobtns"><button type="button" class="sbtn primary" id="mSave">Save</button><button type="button" class="sbtn" id="mCancel">Cancel</button></div></div>`;
+    document.body.appendChild(m);
+    const close = () => { m.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    m.addEventListener('mousedown', (e) => { if (e.target === m) close(); });
+    $('mCancel').onclick = close;
+    $('mAmt').oninput = () => { const v = $('mAmt').value.replace(/[^0-9.,]/g, ''); if (v !== $('mAmt').value) $('mAmt').value = v; };
+    $('mSup').focus();
+    $('mSave').onclick = async () => {
+      if (!$('mSup').value.trim()) return toast('Supplier name cannot be empty.', true);
+      if (!(Number($('mAmt').value.replace(/,/g, '')) > 0)) return toast('PO amount must be a number above 0.', true);
+      $('mSave').disabled = true;
+      try {
+        await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'po_edit', id: r.id, supplier: $('mSup').value, poCategoryId: Number($('mCat').value), brand: $('mBrand').value, remark: $('mRem').value, dateVerified: $('mDv').value, dateReceived: $('mDr').value, amount: $('mAmt').value }) });
+        close(); R.data = null; toast('PO updated.'); await poEnter();
+      } catch (err) { if (!err.auth) { toast(err.message, true); const b = $('mSave'); if (b) b.disabled = false; } }
+    };
   }
 
   /* ----- shared printable form (same layout as the sample SUMMARY_PO sheets) ----- */
@@ -1131,7 +1178,8 @@ select.field { appearance: auto; }
     const groups = [];
     for (const r of rows) { let g = groups[groups.length - 1]; if (!g || g.name !== r.category) { g = { name: r.category, items: [] }; groups.push(g); } g.items.push(r); }
     const body = groups.map((g, gi) => (gi ? '<tr class="gap"><td colspan="9"></td></tr>' : '') + g.items.map((r, n) =>
-      `<tr><td class="c">${n + 1}</td><td>${esc(r.poNo)}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}</td><td>${esc(r.brand)}</td><td class="c">${dmyDot(r.dateVerified)}</td><td class="c">${dmyDot(r.dateReceived)}</td><td class="r">${f2.format(r.amount)}</td><td>${esc(r.remark)}</td></tr>`).join('')).join('');
+      `<tr><td class="c">${n + 1}</td><td>${esc(r.poNo)}</td><td>${esc(r.supplier)}</td><td>${esc(r.category)}</td><td>${esc(r.brand)}</td><td class="c">${dmyDot(r.dateVerified)}</td><td class="c">${dmyDot(r.dateReceived)}</td><td class="r">${f2.format(r.amount)}</td><td>${esc(r.remark)}</td></tr>`).join('')
+      + `<tr class="tot"><td colspan="7" class="r"><b>TOTAL</b></td><td class="r"><b>${f2.format(g.items.reduce((t, r) => t + r.amount, 0))}</b></td><td></td></tr>`).join('');
     return `<div class="paper">
         <h2>PURCHASED ORDER RECEIVED FORM</h2>
         <div class="phead"><div><div>DATE : ${dmyDot(dateIso)}</div><div>OUTLET NAME : ${esc(outlet)}</div></div><div><div>ATTN: ${esc(rep.attn)}</div><div>DEPARTMENT: ${esc(rep.title)}</div></div></div>

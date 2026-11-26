@@ -484,6 +484,21 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.equal((await call(po, { as: '1015-SHPL', query: { view: 'pending' } })).code, 403);
   const idOf = Object.fromEntries(r.body.rows.map((x) => [x.poNo, x.id]));
 
+  // edit a pending PO (any category, every field except PO No)
+  const pend = (await call(po, { query: { view: 'pending' } })).body.rows.find((x) => x.poNo === 'HQ01964261');
+  const pedit = (b, as = '1008-SHBN', id = pend.id) => call(po, { method: 'POST', as, body: { action: 'po_edit', id, supplier: pend.supplier, poCategoryId: bev.id, brand: pend.brand, remark: pend.remark, dateVerified: pend.dateVerified, dateReceived: pend.dateReceived, amount: pend.amount, ...b } });
+  assert.equal((await pedit({ supplier: '' })).code, 400);
+  assert.equal((await pedit({ amount: 'abc' })).code, 400);
+  assert.equal((await pedit({ poCategoryId: 99999 })).code, 400);
+  assert.equal((await pedit({}, '1015-SHPL')).code, 403);
+  assert.equal((await pedit({ supplier: 'new supplier', poCategoryId: pet.id, brand: 'x', remark: '', amount: '1,300.50', dateVerified: '', dateReceived: '2026-12-01' })).code, 200);
+  r = (await call(po)).body;
+  assert.equal(r.categories.length, 32);
+  const pe = r.rows.find((x) => x.poNo === 'HQ01964261');
+  assert.deepEqual([pe.supplier, pe.category, pe.report, pe.brand, pe.amount, pe.dateVerified, pe.dateReceived, pe.pcId], ['NEW SUPPLIER', 'PET FOOD', 'NONFOOD', 'X', 1300.5, null, '2026-12-01', pet.id]);
+  assert.equal((await pedit({ poCategoryId: bev.id, supplier: 'TRANS-BORNEO MARKETING SDN.BHD. (KK)', amount: 1230, dateVerified: '2026-11-20', brand: 'REX', remark: '', dateReceived: '2026-12-11' })).code, 200);   // put it back
+  assert.equal(await bevRecv(), before);                                                  // pending edits never touch the budget
+
   // Save entry: validation
   const submit = (body, as = '1008-SHBN') => call(po, { method: 'POST', as, body: { action: 'submit', ...body } });
   assert.equal((await submit({ report: 'NOPE', ids: [idOf.HQ01964261] })).code, 400);
@@ -501,6 +516,7 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.deepEqual([row1.rid, row1.ev, row1.eby, row1.eacct, row1.cn], [rep1, 1960.5, 'PO HQ01962198', '1008-SHBN', 'BEVERAGES']);
   assert.equal((await call(dashboard)).body.recent[0].submittedBy, 'PO HQ01962198');
   assert.equal(await bevRecv('1015-SHPL'), 0);                                            // other accounts see nothing
+  assert.equal((await pedit({}, '1008-SHBN', idOf.HQ01962198)).code, 409);                 // a saved PO is edited in its report, not here
   // saving the same PO twice (also two people at once) never doubles the budget
   assert.equal((await submit({ report: 'FROZEN/RTD', ids: [idOf.HQ01962198] })).code, 409);
   assert.equal(await bevRecv(), before + 1960.5);

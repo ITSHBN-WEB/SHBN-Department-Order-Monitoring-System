@@ -12,6 +12,7 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken } from '../lib/p
  *   POST { action: 'token' }              create (or replace) this account's Push to DOMS bookmark token
  *   POST { action: 'submit', report, ids }  save the chosen pending POs of one report: adds each PO amount to its category budget
  *   POST { action: 'discard', id }        remove a pending PO (e.g. pushed by mistake) so it can be pushed again
+ *   POST { action: 'po_edit', id, supplier, poCategoryId, brand, remark, dateVerified, dateReceived, amount }  edit a pending PO
  *   POST { action: 'report_save', reportId, updates:[{id,...}], deletes:[poId] }  edit / remove POs of a saved report (budget entries follow)
  *   POST { action: 'report_delete', reportId }  delete a saved report together with its POs and their budget entries
  */
@@ -26,6 +27,17 @@ export default async function handler(req, res) {
     if (!acct) return;
     if (!PO_ACCOUNTS.includes(acct)) return res.status(403).json({ error: 'Push to DOMS is not enabled for this account.', code: 'forbidden' });
 
+
+    const cleanFields = (u, okCats) => {
+      const supplier = String(u?.supplier ?? '').trim().slice(0, 200);
+      const amount = Number(String(u?.amount ?? '').replace(/,/g, ''));
+      const pc = Number(u?.poCategoryId);
+      const day = (v) => { const t = String(v ?? '').slice(0, 10); return ISO.test(t) ? t : ''; };
+      if (!supplier) return { error: 'Supplier name cannot be empty.' };
+      if (!(amount > 0 && amount <= 1e10)) return { error: 'PO amount must be a number above 0.' };
+      if (!okCats.has(pc)) return { error: 'Please choose a valid category.' };
+      return { supplier: supplier.toUpperCase(), amount: Math.round(amount * 100) / 100, pc, brand: String(u.brand ?? '').trim().slice(0, 100).toUpperCase(), remark: String(u.remark ?? '').trim().slice(0, 300).toUpperCase(), dv: day(u.dateVerified), dr: day(u.dateReceived) };
+    };
     if (req.method === 'POST') {
       let body = req.body;
       if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }
@@ -95,6 +107,20 @@ export default async function handler(req, res) {
           ok: true, reportId: Number(o.report_id), saved: o.n, date: today, cycle: current,
           categories: over.map((x) => ({ category: x.category, limit: x.limit, received: x.received, over: x.received > x.limit })),
         });
+      }
+
+      if (body.action === 'po_edit') {
+        const id = Number(body.id);
+        if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Unknown PO.' });
+        const okCats = new Set((await sql`select id from po_categories`).map((c) => Number(c.id)));
+        const f = cleanFields(body, okCats);
+        if (f.error) return res.status(400).json({ error: f.error });
+        const upd = await sql`
+          update purchase_orders set supplier = ${f.supplier}, po_category_id = ${f.pc}, brand = ${f.brand}, remark = ${f.remark},
+                 date_verified = nullif(${f.dv}, '')::date, date_received = nullif(${f.dr}, '')::date, amount = ${f.amount}
+          where id = ${id} and account = ${acct} and report_id is null returning id`;
+        if (!upd.length) return res.status(409).json({ error: 'This PO is already saved in a report (edit it in Submitted Summary Report), or no longer exists.', code: 'gone' });
+        return res.status(200).json({ ok: true });
       }
 
       if (body.action === 'report_delete') {
@@ -209,12 +235,12 @@ export default async function handler(req, res) {
     const listRows = await sql`
         select p.id, p.po_no as "poNo", p.reference, p.supplier, p.date_received::text as "dateReceived", p.date_verified::text as "dateVerified",
                p.amount::float8 as amount, c.name as category, c.report, p.brand, p.remark,
-               (extract(epoch from p.pushed_at) * 1000)::float8 as ts, p.report_id as "reportId"
+               (extract(epoch from p.pushed_at) * 1000)::float8 as ts, p.report_id as "reportId", p.po_category_id as "pcId"
         from purchase_orders p join po_categories c on c.id = p.po_category_id
         where p.account = ${acct} order by p.id desc limit 300`;
     const has = await sql`select 1 from push_tokens where account = ${acct}`;
     const rows = listRows;
-    return res.status(200).json({ account: acct, hasToken: has.length > 0, rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: r.reportId == null ? null : Number(r.reportId) })) });
+    return res.status(200).json({ account: acct, hasToken: has.length > 0, categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })), rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: r.reportId == null ? null : Number(r.reportId) })) });
   } catch (err) {
     console.error('po error', err);
     return res.status(500).json({ error: 'Could not load PO data.' });
