@@ -470,8 +470,14 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.deepEqual(both.map((x) => x.code).sort(), [201, 409]);
   assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01964261'`)[0].n, 1);
   const pet = pcs.find((x) => x.name === 'PET FOOD'), rice = pcs.find((x) => x.name === 'RICE');
-  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940, date_received: '2026-11-20' }, poCategoryId: pet.id, brand: 'MONAS' })).code, 201);   // no verified date is allowed
-  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 500 }, poCategoryId: pet.id, brand: 'ABC' })).code, 201);
+  // a PO that is not verified on the portal yet (blank Posted By / Date) cannot be pushed
+  for (const dv of [undefined, '', '  ', null]) {
+    r = await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940, date_received: '2026-11-20', date_verified: dv }, poCategoryId: pet.id, brand: 'MONAS' });
+    assert.deepEqual([r.code, r.body.code], [400, 'unverified']);
+  }
+  assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01970000'`)[0].n, 0);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940, date_received: '2026-11-20', date_verified: '2026-11-19' }, poCategoryId: pet.id, brand: 'MONAS' })).code, 201);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 500, date_verified: '2026-11-19' }, poCategoryId: pet.id, brand: 'ABC' })).code, 201);
   assert.equal(await bevRecv(), before);                                                  // five pushes later the budget still has not moved
 
   // PO Entry list
@@ -535,7 +541,7 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   const dis = (id) => call(po, { method: 'POST', body: { action: 'discard', id } });
   assert.equal((await dis(idOf.HQ01962198)).code, 409);
   assert.equal((await dis(idOf.HQ01970001)).code, 200);
-  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 510 }, poCategoryId: pet.id })).code, 201);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970001', supplier: 'X SDN BHD', amount: 510, date_verified: '2026-11-19' }, poCategoryId: pet.id })).code, 201);
   assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'discard', id: idOf.HQ01964261 } })).code, 403);
 
   // Submitted Summary Report: saved reports by date range and by report; PO list statuses
@@ -556,7 +562,37 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.deepEqual([r.code, r.body.updated, r.body.deleted], [200, 1, 1]);
   assert.equal((await sql`select amount::float8 a from purchase_orders where po_no = 'HQ01962198'`)[0].a, 2000);
   assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01970000'`)[0].n, 0);
-  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940 }, poCategoryId: pet.id })).code, 201);   // can be pushed again
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940, date_verified: '2026-11-19' }, poCategoryId: pet.id })).code, 201);   // can be pushed again
+
+  // pending view carries the budget numbers for the "if you save these" preview
+  r = (await call(po, { query: { view: 'pending' } })).body;
+  const bud = r.budgets.find((x) => x.name === 'BEVERAGES');
+  assert.deepEqual([bud.received, r.cycle, bud.limit > 0, r.rows.find((x) => x.poNo === 'HQ01964261').catId], [await bevRecv(), r.cycle, true, bud.id]);
+
+  // printed status: not printed when saved, printed after the print dialog was opened, not printed again after an edit
+  r = (await call(po, { query: { view: 'submitted' } })).body;
+  const frz = r.saved.find((x) => x.report === 'FROZEN/RTD');
+  assert.deepEqual([frz.printedAt, frz.printCount], [null, 0]);
+  assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'report_printed', reportId: frz.id } })).code, 403);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'report_printed', reportId: 99999 } })).code, 404);
+  r = await call(po, { method: 'POST', body: { action: 'report_printed', reportId: frz.id } });
+  assert.deepEqual([r.code, r.body.printCount, r.body.printedAt > 0], [200, 1, true]);
+  await call(po, { method: 'POST', body: { action: 'report_printed', reportId: frz.id } });
+  r = (await call(po, { query: { view: 'submitted' } })).body.saved.find((x) => x.id === frz.id);
+  assert.deepEqual([r.printCount, r.printedAt > 0], [2, true]);
+  const frzPo = (await call(po, { query: { view: 'submitted' } })).body.rows.find((x) => x.reportId === frz.id);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'report_save', reportId: frz.id, deletes: [], updates: [{ id: frzPo.id, supplier: frzPo.supplier, poCategoryId: frzPo.pcId, brand: 'CHANGED', remark: '', dateVerified: frzPo.dateVerified, dateReceived: frzPo.dateReceived, amount: frzPo.amount }] } })).code, 200);
+  assert.equal((await call(po, { query: { view: 'submitted' } })).body.saved.find((x) => x.id === frz.id).printedAt, null);   // edited: print again
+
+  // search by PO No / brand / supplier over ALL dates (the date range is ignored while searching)
+  const srch = async (q, extra = {}) => (await call(po, { query: { view: 'submitted', q, ...extra } })).body;
+  r = await srch('changed', { from: '2020-01-01', to: '2020-01-02' });
+  assert.deepEqual([r.saved.map((x) => x.id), r.rows.map((x) => x.poNo)], [[frz.id], ['HQ01962198']]);
+  assert.equal((await srch('hq0196')).saved.length >= 1, true);
+  assert.deepEqual((await srch('1962198')).saved.map((x) => x.id), [frz.id]);                      // part of the PO No
+  assert.equal((await srch('zzz-nothing')).saved.length, 0);
+  assert.equal((await srch("%' or 1=1 --")).saved.length, 0);                                       // plain text only
+  assert.equal((await call(po, { as: '1015-SHPL', query: { view: 'submitted', q: 'hq' } })).code, 403);
 
   // the saved NONFOOD report lost its only PO to Central Admin, so it disappears from Submitted Summary Report; FROZEN/RTD shows the edited amount
   r = await call(po, { query: { view: 'submitted' } });
@@ -566,7 +602,7 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   // edit a saved report: save two FOOD POs, then change one (supplier, category, amount...) and remove the other
   const food2 = (await call(po, { query: { view: 'pending' } })).body.rows.filter((x) => x.report === 'FOOD');
   const dFood = Object.fromEntries(food2.map((x) => [x.poNo, x.id]));
-  assert.equal((await push({ k: token, po: { po_no: 'HQ01980001', supplier: 'A SDN BHD', amount: 300 }, poCategoryId: rice.id })).code, 201);
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01980001', supplier: 'A SDN BHD', amount: 300, date_verified: '2026-11-19' }, poCategoryId: rice.id })).code, 201);
   const food3 = (await call(po, { query: { view: 'pending' } })).body.rows.filter((x) => x.report === 'FOOD').map((x) => x.id);
   const riceRecv = async () => (await call(dashboard)).body.categories.find((c) => c.name === 'RICE').received;
   const rice0 = await riceRecv(), bev1 = await bevRecv();
@@ -649,7 +685,7 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.equal((await check('HQ09999999', t1)).code, 200);
   assert.equal((await call(po, { method: 'POST', body: { action: 'token', id: 99999 } })).code, 404);
   // a push marks the computer as used
-  await push({ k: t1, po: { po_no: 'HQ05550000', supplier: 'S', amount: 1 }, poCategoryId: pet.id });
+  await push({ k: t1, po: { po_no: 'HQ05550000', supplier: 'S', amount: 1, date_verified: '2026-11-19' }, poCategoryId: pet.id });
   assert.ok((await call(po)).body.devices.find((x) => x.name === 'SHBN1').lastUsed > 0);
   // upgrade: the single bookmark of the earlier version becomes this account's first computer
   await sql`delete from push_devices where account = '1008-SHBN'`;

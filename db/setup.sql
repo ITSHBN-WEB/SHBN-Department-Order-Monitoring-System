@@ -287,6 +287,8 @@ create table if not exists purchase_orders (
 alter table purchase_orders alter column entry_id drop not null;
 alter table purchase_orders alter column cycle_no drop not null;
 alter table purchase_orders add column if not exists report_id bigint references po_reports(id);
+alter table po_reports add column if not exists printed_at timestamptz;
+alter table po_reports add column if not exists print_count int not null default 0;
 create index if not exists po_reports_saved_idx on po_reports (account, saved_at);
 create index if not exists purchase_orders_report_idx on purchase_orders (report_id);
 create index if not exists purchase_orders_pushed_idx on purchase_orders (account, pushed_at);

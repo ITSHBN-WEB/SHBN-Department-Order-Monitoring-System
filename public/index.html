@@ -368,6 +368,9 @@ select.field { appearance: auto; }
 .rpt-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; margin-bottom: 16px; }
 .rpt-controls label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .rpt-controls .field { width: auto; }
+.rpt-controls .rsearch { margin-left: auto; } .rpt-controls .rsearch .field { width: 210px; max-width: 100%; }
+.pill.print { background: rgba(45,212,191,.16); color: var(--accent); } .pill.noprint { background: rgba(245,158,11,.18); color: #f59e0b; }
+.hits { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.5; } .hits b { color: var(--text); }
 .tabs2 { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .tabs2 button { background: var(--surface); color: var(--muted); border: 0; padding: 9px 16px; font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
 .tabs2 button:last-child { border-right: 0; }
@@ -1084,13 +1087,13 @@ select.field { appearance: auto; }
   const poEl = $('poMain'), rptEl = $('rptMain');
   const P = { rows: null, cats: [], devices: [], q: '', loading: false, err: '' };
   const R = { data: null, report: 'FOOD', sel: new Set(), msg: null, err: '' };
-  const S = { data: null, report: 'ALL', from: '', to: '', open: null, edit: null, err: '' };
+  const S = { data: null, report: 'ALL', from: '', to: '', q: '', open: null, edit: null, err: '' };
   const subEl = $('subMain'), bmEl = $('bmMain');
   const f2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dmyDot = (s) => (s ? s.slice(0, 10).split('-').reverse().join('.') : '');
   const dmySlash = (s) => (s ? s.slice(0, 10).split('-').reverse().join('/') : '');
 
-  function poReset() { P.rows = null; P.devices = []; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; bmEl.innerHTML = ''; B.devices = null; B.err = ''; }
+  function poReset() { P.rows = null; P.devices = []; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.q = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; bmEl.innerHTML = ''; B.devices = null; B.err = ''; }
   async function poApi(url, opts) {
     const r = await fetch(url, { cache: 'no-store', ...opts });
     const j = await r.json().catch(() => ({}));
@@ -1220,40 +1223,35 @@ select.field { appearance: auto; }
     }));
   }
 
-  /* ----- popup after "Save entry & Print": how much each budget category grew ----- */
-  function printSaved(html) {
+  /* ----- printing: the saved report is printed from a hidden copy, so the page behind can already show the next state ----- */
+  function printSaved(html, onPrinted) {
     let pa = $('printArea'); if (!pa) { pa = document.createElement('div'); pa.id = 'printArea'; document.body.appendChild(pa); }
     pa.innerHTML = html; document.body.dataset.pa = '1';
-    window.addEventListener('afterprint', () => { delete document.body.dataset.pa; pa.innerHTML = ''; }, { once: true });
+    window.addEventListener('afterprint', () => { delete document.body.dataset.pa; pa.innerHTML = ''; if (onPrinted) onPrinted(); }, { once: true });
     window.print();
   }
-  function showSaved(j, rep, rows, outlet) {
-    const old = $('poModal'); if (old) old.remove();
-    const total = rows.reduce((t, r) => t + r.amount, 0);
+  // "Printed" = the print dialog was opened for this report (a browser cannot tell whether paper actually came out)
+  async function markPrinted(reportId) {
+    try { await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'report_printed', reportId }) }); S.data = null; } catch { /* status is only informational */ }
+  }
+  // budget growth table: used for the live preview when POs are ticked
+  function impactHtml(budgets, picked) {
+    const add = new Map(); picked.forEach((r) => add.set(r.catId, (add.get(r.catId) || 0) + r.amount));
+    const rows = [...add.entries()].map(([id, a]) => ({ b: budgets.find((x) => x.id === id), a })).filter((x) => x.b);
+    if (!rows.length) return '';
     const pct = (v, l) => (l > 0 ? (v / l) * 100 : 0);
-    const over = j.categories.filter((c) => c.over);
-    const m = document.createElement('div'); m.id = 'poModal'; m.className = 'modal-back';
-    m.innerHTML = `<div class="modal-card wide" role="dialog" aria-modal="true" aria-label="Report saved">
-      <h2>✓ Report saved - budget updated</h2>
-      <p class="sub2">${esc(repLabel(rep.code))} report · ${j.saved} PO${j.saved === 1 ? '' : 's'} · RM <b>${f2.format(total)}</b> added to ${esc(cycleName(j.cycle))}</p>
-      ${over.length ? `<div class="rptmsg warn" style="margin:12px 0 0"><b>Over limit:</b> ${over.map((c) => `${esc(c.category)} by RM ${f2.format(c.received - c.limit)}`).join(', ')}</div>` : ''}
-      <div class="poscroll" style="margin-top:12px"><table class="potable grow">
-        <thead><tr><th>Budget category</th><th class="num">Limit</th><th class="num">Before</th><th class="num">Added</th><th class="num">After</th><th class="barcol">Budget used</th></tr></thead>
-        <tbody>${j.categories.map((c) => {
-          const pb = pct(c.before, c.limit), pa = pct(c.received, c.limit);
-          const wb = Math.min(pb, 100), wa = Math.max(0, Math.min(pa, 100) - wb);
-          return `<tr class="${c.over ? 'ov' : ''}"><td><b>${esc(c.category)}</b><div class="sub2">${esc(c.department || '')}</div></td><td class="num">${f2.format(c.limit)}</td><td class="num">${f2.format(c.before)}</td><td class="num"><b>+${f2.format(c.added)}</b></td><td class="num"><b>${f2.format(c.received)}</b></td>
-            <td class="barcol"><div class="gbar" role="img" aria-label="${pb.toFixed(1)} percent before, ${pa.toFixed(1)} percent after"><i class="b" style="width:${wb}%"></i><i class="a" style="width:${wa}%"></i></div><div class="sub2">${pb.toFixed(1)}% → <b>${pa.toFixed(1)}%</b>${c.over ? ' · OVER' : ''}</div></td></tr>`;
+    const over = rows.filter((x) => x.b.received + x.a > x.b.limit);
+    return `<section class="card nopr pocard" aria-label="Budget impact" style="padding-bottom:10px">
+      <h2>Budget impact if you save the ticked POs</h2>
+      ${over.length ? `<div class="rptmsg warn" style="margin:8px 0"><b>Would go over the limit:</b> ${over.map((x) => `${esc(x.b.name)} by RM ${f2.format(x.b.received + x.a - x.b.limit)}`).join(', ')}</div>` : ''}
+      <div class="poscroll"><table class="potable grow">
+        <thead><tr><th>Budget category</th><th class="num">Limit</th><th class="num">Used now</th><th class="num">Adding</th><th class="num">After</th><th class="barcol">Budget used</th></tr></thead>
+        <tbody>${rows.map(({ b, a }) => {
+          const after = b.received + a, pb = pct(b.received, b.limit), pa = pct(after, b.limit), wb = Math.min(pb, 100), wa = Math.max(0, Math.min(pa, 100) - wb), ov = after > b.limit;
+          return `<tr class="${ov ? 'ov' : ''}"><td><b>${esc(b.name)}</b><div class="sub2">${esc(b.department || '')}</div></td><td class="num">${f2.format(b.limit)}</td><td class="num">${f2.format(b.received)}</td><td class="num"><b>+${f2.format(a)}</b></td><td class="num"><b>${f2.format(after)}</b></td>
+            <td class="barcol"><div class="gbar" role="img" aria-label="${pb.toFixed(1)} percent now, ${pa.toFixed(1)} percent after"><i class="b" style="width:${wb}%"></i><i class="a" style="width:${wa}%"></i></div><div class="sub2">${pb.toFixed(1)}% → <b>${pa.toFixed(1)}%</b>${ov ? ' · OVER' : ''}</div></td></tr>`;
         }).join('')}</tbody></table></div>
-      <p class="sub2" style="margin-top:10px">The report is saved. Press Print to print it, or find it later in Submitted Summary Report.</p>
-      <div class="pobtns"><button type="button" class="sbtn primary" id="svPrint">Print report</button><button type="button" class="sbtn" id="svClose">Close</button></div></div>`;
-    document.body.appendChild(m);
-    const close = () => { m.remove(); document.removeEventListener('keydown', onKey); };
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
-    document.addEventListener('keydown', onKey);
-    $('svClose').onclick = close;
-    $('svPrint').onclick = () => printSaved(paperHtml(rep, j.date, outlet, rows));
-    $('svPrint').focus();
+    </section>`;
   }
 
   /* ----- shared printable form (same layout as the sample SUMMARY_PO sheets) ----- */
@@ -1300,25 +1298,30 @@ select.field { appearance: auto; }
         <div><label>Report</label><div class="tabs2" role="group" aria-label="Report">${d.reports.map((x) => `<button type="button" data-rep="${esc(x.code)}" aria-pressed="${x.code === rep.code}">${esc(repLabel(x.code))} (${count(x.code)})</button>`).join('')}</div></div>
         <button type="button" class="sbtn primary" id="rSave" ${picked.length ? '' : 'disabled'}>Save entry &amp; Print</button>
       </div>
-      <div class="subtle-row nopr"><span><b>${picked.length}</b> of ${mine.length} PO${mine.length === 1 ? '' : 's'} ticked · RM <b>${f2.format(total)}</b></span><span>Untick a PO to leave it for a later report. Saving adds each ticked PO amount to its category budget and shows how the budgets grow.</span></div>
+      <div class="subtle-row nopr"><span><b>${picked.length}</b> of ${mine.length} PO${mine.length === 1 ? '' : 's'} ticked · RM <b>${f2.format(total)}</b></span><span>Untick a PO to leave it for a later report. Saving adds each ticked PO amount to its category budget, then prints.</span></div>
       <section class="card nopr pocard" aria-label="Choose POs">
         <div class="poscroll"><table class="potable"><thead><tr><th style="width:34px"><input type="checkbox" id="ckAll" ${mine.length && picked.length === mine.length ? 'checked' : ''} ${mine.length ? '' : 'disabled'} aria-label="Select all"></th><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th class="num">PO amount (RM)</th></tr></thead>
         <tbody>${mine.length ? mine.map((r) => `<tr class="${R.sel.has(r.id) ? 'sel' : ''}"><td><input type="checkbox" data-id="${r.id}" ${R.sel.has(r.id) ? 'checked' : ''} aria-label="Include ${esc(r.poNo)}"></td><td><b>${esc(r.poNo)}</b></td><td>${esc(r.supplier)}</td><td>${esc(r.category)}</td><td>${esc(r.brand)}</td><td class="num">${f2.format(r.amount)}</td></tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);padding:18px">No pending POs for this report.</td></tr>'}</tbody></table></div>
       </section>
+      ${impactHtml(d.budgets, picked)}
       ${paperHtml(rep, d.today, d.outlet, picked)}`;
     rptEl.querySelectorAll('[data-rep]').forEach((b) => (b.onclick = () => { R.report = b.dataset.rep; renderRpt(); }));
     rptEl.querySelectorAll('input[data-id]').forEach((c) => (c.onchange = () => { const id = Number(c.dataset.id); c.checked ? R.sel.add(id) : R.sel.delete(id); renderRpt(); }));
     const all = $('ckAll'); if (all) all.onchange = () => { mine.forEach((r) => (all.checked ? R.sel.add(r.id) : R.sel.delete(r.id))); renderRpt(); };
     $('rSave').onclick = async () => {
       const ids = picked.map((r) => r.id);
-      if (!confirm(`Save ${ids.length} PO${ids.length === 1 ? '' : 's'} (RM ${f2.format(total)}) in the ${repLabel(rep.code)} report?\n\nThis adds the amounts to the category budgets. A summary will then show how each budget grows, with a Print button.`)) return;
+      if (!confirm(`Save ${ids.length} PO${ids.length === 1 ? '' : 's'} (RM ${f2.format(total)}) in the ${repLabel(rep.code)} report?\n\nThis adds the amounts to the category budgets and then prints the report.`)) return;
       const btn = $('rSave'); btn.disabled = true; btn.textContent = 'Saving…';
       try {
         const j = await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', report: rep.code, ids }) });
-        S.data = null; P.rows = null; R.msg = null;
-        const savedRows = picked.slice();
-        R.data.rows = R.data.rows.filter((r) => !ids.includes(r.id)); ids.forEach((i) => R.sel.delete(i)); renderRpt();
-        showSaved(j, rep, savedRows, d.outlet);
+        S.data = null; P.rows = null;
+        const over = j.categories.filter((c) => c.over);
+        R.msg = { warn: over.length > 0, html: `Saved ${j.saved} PO${j.saved === 1 ? '' : 's'} in the ${esc(repLabel(rep.code))} report. Budgets updated.${over.length ? ' <b>Over limit:</b> ' + over.map((c) => `${esc(c.category)} (${f2.format(c.received)} of ${f2.format(c.limit)})`).join(', ') + '.' : ''} Reprint any time from Submitted Summary Report.` };
+        const savedRows = picked.slice(), html = paperHtml(rep, j.date, d.outlet, savedRows);
+        R.data.rows = R.data.rows.filter((r) => !ids.includes(r.id)); ids.forEach((i) => R.sel.delete(i));
+        for (const b of d.budgets) { const c = j.categories.find((x) => x.category === b.name); if (c) b.received = c.received; }   // preview numbers follow the new budget
+        renderRpt();
+        printSaved(html, () => markPrinted(j.reportId));
       } catch (err) {
         if (err.auth) return;
         R.msg = { warn: true, html: esc(err.message) }; await rptLoad(true);
@@ -1333,7 +1336,7 @@ select.field { appearance: auto; }
   }
   async function subLoad() {
     try {
-      const qs = S.from ? `&from=${S.from}&to=${S.to || S.from}` : '';
+      const qs = (S.from ? `&from=${S.from}&to=${S.to || S.from}` : '') + (S.q.trim() ? '&q=' + encodeURIComponent(S.q.trim()) : '');
       S.data = await poApi('/api/po?view=submitted' + qs); S.from = S.data.from; S.to = S.data.to; S.err = '';
     } catch (err) { if (err.auth) return; S.err = err.message; }
     renderSub();
@@ -1344,6 +1347,12 @@ select.field { appearance: auto; }
     const list = d.saved.filter((r) => S.report === 'ALL' || r.report === S.report);
     const open = list.find((r) => r.id === S.open) || null;
     const rep = open ? d.reports.find((x) => x.code === open.report) : null;
+    const needle = S.q.trim().toUpperCase();
+    const hitsHtml = (r) => {
+      if (!needle) return '';
+      const hs = d.rows.filter((x) => x.reportId === r.id && [x.poNo, x.brand, x.supplier].some((v) => String(v || '').toUpperCase().includes(needle)));
+      return hs.length ? `<div class="hits">${hs.slice(0, 4).map((x) => `<b>${esc(x.poNo)}</b> · ${esc(x.brand)} · ${f2.format(x.amount)}`).join('<br>')}${hs.length > 4 ? `<br>+${hs.length - 4} more` : ''}</div>` : '';
+    };
     const dt = (ts) => { const x = new Date(ts); return x.toLocaleDateString('en-GB') + ' ' + x.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); };
     subEl.innerHTML = `
       <div class="top rpt-top"><div><h1>Submitted Summary Report</h1><div class="sub">Reports already saved to the budget · ${esc(state.auth.code)}</div></div></div>
@@ -1352,12 +1361,13 @@ select.field { appearance: auto; }
         <div><label for="sFrom">Saved from</label><input class="field" type="date" id="sFrom" value="${esc(S.from)}"></div>
         <div><label for="sTo">to</label><input class="field" type="date" id="sTo" value="${esc(S.to)}"></div>
         ${open && !S.edit ? '<button type="button" class="sbtn primary" id="sPrint">Print this report</button>' : ''}
+        <div class="rsearch"><label for="sQ">Search PO or brand</label><input class="field" type="search" id="sQ" placeholder="PO No or brand…" value="${esc(S.q)}" autocomplete="off" maxlength="60"></div>
       </div>
       <section class="card nopr" aria-label="Saved reports">
-        <div class="alist-head"><strong>${list.length} saved report${list.length === 1 ? '' : 's'}</strong><span class="hint">Total RM ${f2.format(list.reduce((t, r) => t + r.total, 0))}</span></div>
+        <div class="alist-head"><strong>${list.length} saved report${list.length === 1 ? '' : 's'}${S.q.trim() ? ' matching your search (all dates)' : ''}</strong><span class="hint">Total RM ${f2.format(list.reduce((t, r) => t + r.total, 0))}</span></div>
         <div class="poscroll"><table class="potable">
-          <thead><tr><th>Saved</th><th>Report</th><th>Cycle</th><th class="num">POs</th><th class="num">Total (RM)</th><th></th></tr></thead>
-          <tbody>${list.length ? list.map((r) => `<tr class="${r.id === S.open ? 'sel' : ''}"><td>${dt(r.ts)}</td><td><b>${esc(repLabel(r.report))}</b></td><td>${cycleName(r.cycle)}</td><td class="num">${r.count}</td><td class="num"><b>${f2.format(r.total)}</b></td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-open="${r.id}">${r.id === S.open ? 'Hide' : 'View / Print'}</button> <button type="button" class="mini" data-edit="${r.id}">Edit</button> <button type="button" class="mini danger" data-delrep="${r.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);padding:22px">No saved reports in this period.</td></tr>'}</tbody>
+          <thead><tr><th>Saved</th><th>Report</th><th>Status</th><th>Cycle</th><th class="num">POs</th><th class="num">Total (RM)</th><th></th></tr></thead>
+          <tbody>${list.length ? list.map((r) => `<tr class="${r.id === S.open ? 'sel' : ''}"><td>${dt(r.ts)}</td><td><b>${esc(repLabel(r.report))}</b>${hitsHtml(r)}</td><td>${r.printedAt ? `<span class="pill print">PRINTED</span><div class="sub2">${dt(r.printedAt)}${r.printCount > 1 ? ' · ' + r.printCount + ' times' : ''}</div>` : '<span class="pill noprint">NOT PRINTED</span>'}</td><td>${cycleName(r.cycle)}</td><td class="num">${r.count}</td><td class="num"><b>${f2.format(r.total)}</b></td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-open="${r.id}">${r.id === S.open ? 'Hide' : 'View / Print'}</button> <button type="button" class="mini" data-edit="${r.id}">Edit</button> <button type="button" class="mini danger" data-delrep="${r.id}">Delete</button></td></tr>`).join('') : `<tr><td colspan="7" style="color:var(--muted);padding:22px">${S.q.trim() ? 'No saved report has a PO or brand matching your search.' : 'No saved reports in this period.'}</td></tr>`}</tbody>
         </table></div>
       </section>
       ${S.edit ? editorHtml(d) : open ? `<div style="margin-top:16px">${paperHtml(rep, open.date, d.outlet, d.rows.filter((r) => r.reportId === open.id))}</div>` : ''}`;
@@ -1365,7 +1375,9 @@ select.field { appearance: auto; }
     subEl.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { const id = Number(b.dataset.open); S.open = S.open === id ? null : id; renderSub(); }));
     const onDate = () => { const a = $('sFrom').value, b = $('sTo').value; if (!a) return; S.from = a; S.to = b && b >= a ? b : a; S.open = null; subLoad(); };
     $('sFrom').onchange = onDate; $('sTo').onchange = onDate;
-    const pr = $('sPrint'); if (pr) pr.onclick = () => window.print();
+    const pr = $('sPrint'); if (pr) pr.onclick = () => { const id = S.open; window.addEventListener('afterprint', () => markPrinted(id).then(() => subLoad()), { once: true }); window.print(); };
+    const sq = $('sQ');
+    if (sq) { let tmr; sq.oninput = () => { clearTimeout(tmr); tmr = setTimeout(async () => { S.q = sq.value; S.open = null; S.edit = null; await subLoad(); const n = $('sQ'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); }; }
     subEl.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => {
       const id = Number(b.dataset.edit), rp = d.saved.find((x) => x.id === id); if (!rp) return;
       S.open = id;

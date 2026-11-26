@@ -7,8 +7,8 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken, nextDeviceName 
  * PO Entry / PO Summary Report / Submitted Summary Report data for the signed-in account (test run: PO_ACCOUNTS only).
  * A pushed PO is PENDING: it does not touch the budget. It is added to the budget only when the user saves it in a summary report.
  *   GET  ?view=list                       pending POs (not yet saved in a report), newest first
- *   GET  ?view=pending                    pending POs for the three printable reports (preview)
- *   GET  ?view=submitted&from=&to=        saved reports (with their POs) saved between two dates (Kuala Lumpur calendar)
+ *   GET  ?view=pending                    pending POs for the three printable reports (preview) + each budget category's limit / received now
+ *   GET  ?view=submitted&from=&to=&q=     saved reports (with their POs) saved between two dates (Kuala Lumpur calendar); q = search PO No / brand / supplier in ALL dates
  *   POST { action: 'token', id? }         add a computer (default name SHBN1, SHBN2, ...) and give it a new bookmark token; with id: replace that computer's token
  *   POST { action: 'device_rename', id, name }  rename a computer
  *   POST { action: 'device_delete', id }  remove a computer (its bookmark stops working)
@@ -16,6 +16,7 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken, nextDeviceName 
  *   POST { action: 'discard', id }        remove a pending PO (e.g. pushed by mistake) so it can be pushed again
  *   POST { action: 'po_edit', id, supplier, poCategoryId, brand, remark, dateVerified, dateReceived, amount }  edit a pending PO
  *   POST { action: 'report_save', reportId, updates:[{id,...}], deletes:[poId] }  edit / remove POs of a saved report (budget entries follow)
+ *   POST { action: 'report_printed', reportId }  mark a saved report as printed (the print dialog was opened)
  *   POST { action: 'report_delete', reportId }  delete a saved report together with its POs and their budget entries
  */
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -161,6 +162,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
+      if (body.action === 'report_printed') {
+        const rid = Number(body.reportId);
+        if (!Number.isInteger(rid) || rid <= 0) return res.status(400).json({ error: 'Unknown report.' });
+        const up = await sql`update po_reports set printed_at = now(), print_count = print_count + 1 where id = ${rid} and account = ${acct} returning (extract(epoch from printed_at) * 1000)::float8 as ts, print_count as n`;
+        if (!up.length) return res.status(404).json({ error: 'This report no longer exists.', code: 'gone' });
+        return res.status(200).json({ ok: true, printedAt: up[0].ts, printCount: up[0].n });
+      }
+
       if (body.action === 'report_delete') {
         const rid = Number(body.reportId);
         if (!Number.isInteger(rid) || rid <= 0) return res.status(400).json({ error: 'Unknown report.' });
@@ -219,6 +228,7 @@ export default async function handler(req, res) {
           )
           select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted, (select count(*) from ent)::int as e`;
         // a report with no POs left is removed as well
+        await sql`update po_reports set printed_at = null where id = ${rid} and account = ${acct}`;      // changed content: needs printing again
         const left = await sql`select 1 from purchase_orders where report_id = ${rid}`;
         if (!left.length) await sql`delete from po_reports where id = ${rid} and account = ${acct}`;
         return res.status(200).json({ ok: true, updated: out[0].updated, deleted: out[0].deleted, reportGone: !left.length });
@@ -235,25 +245,49 @@ export default async function handler(req, res) {
     const ISO_DAY = (v, d) => (ISO.test(v || '') ? v : d);
 
     if (req.query?.view === 'pending') {
+      const settings = await loadSettings(sql);
+      const { current } = currentCycle(settings, todayKL());
       const rows = await sql`
         select p.id, p.po_no as "poNo", p.supplier, p.date_received::text as "dateReceived", p.date_verified::text as "dateVerified",
-               p.amount::float8 as amount, c.name as category, c.report, c.sort_order as "sort", p.brand, p.remark, (extract(epoch from p.pushed_at) * 1000)::float8 as ts
+               p.amount::float8 as amount, c.name as category, c.report, c.sort_order as "sort", p.brand, p.remark, c.category_id as "catId",
+               (extract(epoch from p.pushed_at) * 1000)::float8 as ts
         from purchase_orders p join po_categories c on c.id = p.po_category_id
         where p.account = ${acct} and p.report_id is null
         order by c.sort_order, p.id`;
-      return res.status(200).json({ today: todayKL(), outlet: OUTLET_NAME[acct] || acct, reports: await attnMap(), rows: rows.map((r) => ({ ...r, id: Number(r.id) })) });
+      // budget now (current cycle) of every DOMS category a PO category feeds, for the "if you save these" preview
+      const budgets = await sql`
+        select c.id, c.name, c.department, coalesce(al.limit_value, c.limit_value)::float8 as "limit",
+               (select coalesce(sum(e.value), 0)::float8 from entries e where e.account = ${acct} and e.category_id = c.id and e.cycle_no = ${current}) as received
+        from categories c left join account_limits al on al.category_id = c.id and al.account = ${acct}
+        where c.id in (select category_id from po_categories)`;
+      return res.status(200).json({
+        today: todayKL(), outlet: OUTLET_NAME[acct] || acct, reports: await attnMap(), cycle: current,
+        budgets: budgets.map((b) => ({ ...b, id: Number(b.id) })),
+        rows: rows.map((r) => ({ ...r, id: Number(r.id), catId: Number(r.catId) })),
+      });
     }
 
     if (req.query?.view === 'submitted') {
       const today = todayKL();
       const from = ISO_DAY(req.query.from, today.slice(0, 8) + '01');          // default: from the 1st of this month
       const to = ISO_DAY(req.query.to, today);
-      const reps = await sql`
-        select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle,
-               count(p.id)::int as count, sum(p.amount)::float8 as total
-        from po_reports r join purchase_orders p on p.report_id = r.id
-        where r.account = ${acct} and (r.saved_at at time zone 'Asia/Kuala_Lumpur')::date between ${from}::date and ${to}::date
-        group by r.id order by r.id desc limit 200`;
+      const q = String(req.query.q ?? '').trim().toUpperCase().slice(0, 60);
+      const reps = q
+        ? await sql`
+          select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle,
+                 count(p.id)::int as count, sum(p.amount)::float8 as total, (extract(epoch from r.printed_at) * 1000)::float8 as "printedAt", r.print_count as "printCount"
+          from po_reports r join purchase_orders p on p.report_id = r.id
+          where r.account = ${acct} and r.id in (
+            select report_id from purchase_orders
+            where account = ${acct} and report_id is not null
+              and (position(${q} in upper(po_no)) > 0 or position(${q} in upper(brand)) > 0 or position(${q} in upper(supplier)) > 0))
+          group by r.id order by r.id desc limit 200`
+        : await sql`
+          select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle,
+                 count(p.id)::int as count, sum(p.amount)::float8 as total, (extract(epoch from r.printed_at) * 1000)::float8 as "printedAt", r.print_count as "printCount"
+          from po_reports r join purchase_orders p on p.report_id = r.id
+          where r.account = ${acct} and (r.saved_at at time zone 'Asia/Kuala_Lumpur')::date between ${from}::date and ${to}::date
+          group by r.id order by r.id desc limit 200`;
       const ids = reps.map((r) => Number(r.id));
       const rows = ids.length ? await sql`
         select p.id, p.po_no as "poNo", p.supplier, p.date_received::text as "dateReceived", p.date_verified::text as "dateVerified",
@@ -262,7 +296,7 @@ export default async function handler(req, res) {
         where p.account = ${acct} and p.report_id = any(${ids}::bigint[])
         order by c.sort_order, p.id` : [];
       return res.status(200).json({
-        today, from, to, outlet: OUTLET_NAME[acct] || acct, reports: await attnMap(),
+        today, from, to, q, outlet: OUTLET_NAME[acct] || acct, reports: await attnMap(),
         categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })),
         saved: reps.map((r) => ({ ...r, id: Number(r.id) })),
         rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: Number(r.reportId), pcId: Number(r.pcId) })),

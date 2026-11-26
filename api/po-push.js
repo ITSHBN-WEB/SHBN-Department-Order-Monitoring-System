@@ -39,7 +39,7 @@ export default async function handler(req, res) {
 
     await touchToken(sql, body.k);
     const parsed = cleanPush(body);
-    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    if (parsed.error) return res.status(400).json({ error: parsed.error, code: parsed.code });
     const v = parsed.value;
 
     const dupReply = async () => {

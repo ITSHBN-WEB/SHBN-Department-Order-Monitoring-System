@@ -117,6 +117,13 @@
     return;
   }
 
+  // a PO that has not been verified on the portal yet (blank Posted By / Date) cannot be pushed
+  if (!po.date_verified) {
+    say('err', 'PO ' + po.po_no + ' has not been verified yet (Posted By / Date is blank). Verify it on the portal first, then push it.');
+    $('cancel').textContent = 'Close';
+    return;
+  }
+
   /* ---------- 3. ask DOMS: category list + "already recorded?" ---------- */
   say('info', 'Checking DOMS…');
   fetch(APP + '/api/po-push?k=' + encodeURIComponent(TOKEN) + '&po=' + encodeURIComponent(po.po_no), { cache: 'no-store' })
