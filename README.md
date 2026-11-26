@@ -79,12 +79,12 @@ Only the 1008-SHBN account sees the **PO Entry**, **PO Summary Report** and **Su
 3. Choose the **Category**, check the **Brand**, add a **Remark** (optional), then **Send to DOMS**. A PO No already in DOMS is blocked.
 4. The pushed PO is **PENDING**: it does not change any budget. It shows in **PO Entry** (a pending PO can be removed and pushed again).
 5. **PO Summary Report** tab: pick Food, Frozen/RTD or Nonfood to preview the pending POs on the printable form. Untick any PO to leave it for a later report, then press **Save entry & Print**. Saving adds each ticked PO amount to its category budget (current cycle, visible in the Dashboard and Recent Activity) and prints the report. The saved POs leave the preview.
-6. **Submitted Summary Report** tab: every saved report, filtered by saved date range (default last 30 days) and by report (All / Food / Frozen/RTD / Nonfood). Press View / Print to open one and print it again.
+6. **Submitted Summary Report** tab: every saved report, filtered by saved date range (default last 30 days) and by report (All / Food / Frozen/RTD / Nonfood). Press **View / Print** to open one and print it again, **Edit** to change its POs (supplier, category within the same report, brand, dates, amount, remark; the PO No is fixed) or remove a PO from it, and **Delete** to delete the whole report. Edits, removals and deletes also change the category budgets: the PO's budget entry moves or changes with it, and a deleted report takes its POs and their values off the budgets (the PO numbers can then be pushed again).
 
 Each report has its own Attn To, Department and PO categories (BEVERAGES is on Food, READY TO DRINKS on Frozen/RTD; both count to the BEVERAGES budget). The form prints A4 portrait (page numbers 1/2, 2/2 appear at the bottom right when it runs to two pages; signature lines for Verify by / Approved by) and shows the portal PO No.
 If the popup says a field was "not found", the portal page layout differs from what the bookmark expects: send a screenshot and the readers can be adjusted.
 
-Editing a saved entry's value in Record Adjustments updates the PO amount; deleting it also removes the PO from the saved report (so it can be pushed again).
+Editing a saved entry's value in Record Adjustments updates the PO amount; deleting it also removes the PO from the saved report (and the report disappears if it ends up with no POs), so it can be pushed again.
 New tables are created automatically on the first request after deploy (db/setup.sql also contains them).
 
 ## Deploy (once)

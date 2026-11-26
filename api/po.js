@@ -12,6 +12,8 @@ import { PO_ACCOUNTS, OUTLET_NAME, REPORTS, hashToken, newToken } from '../lib/p
  *   POST { action: 'token' }              create (or replace) this account's Push to DOMS bookmark token
  *   POST { action: 'submit', report, ids }  save the chosen pending POs of one report: adds each PO amount to its category budget
  *   POST { action: 'discard', id }        remove a pending PO (e.g. pushed by mistake) so it can be pushed again
+ *   POST { action: 'report_save', reportId, updates:[{id,...}], deletes:[poId] }  edit / remove POs of a saved report (budget entries follow)
+ *   POST { action: 'report_delete', reportId }  delete a saved report together with its POs and their budget entries
  */
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -94,6 +96,69 @@ export default async function handler(req, res) {
           categories: over.map((x) => ({ category: x.category, limit: x.limit, received: x.received, over: x.received > x.limit })),
         });
       }
+
+      if (body.action === 'report_delete') {
+        const rid = Number(body.reportId);
+        if (!Number.isInteger(rid) || rid <= 0) return res.status(400).json({ error: 'Unknown report.' });
+        const mine = await sql`select 1 from po_reports where id = ${rid} and account = ${acct}`;
+        if (!mine.length) return res.status(404).json({ error: 'This report no longer exists.', code: 'gone' });
+        // deleting a budget entry also removes its PO (foreign key cascade), so the budget goes down by exactly what the report added
+        const ents = await sql`
+          delete from entries e using purchase_orders p
+          where p.report_id = ${rid} and p.account = ${acct} and e.id = p.entry_id and e.account = ${acct}
+          returning e.id`;
+        await sql`delete from purchase_orders where report_id = ${rid} and account = ${acct}`;
+        await sql`delete from po_reports where id = ${rid} and account = ${acct}`;
+        return res.status(200).json({ ok: true, removed: ents.length });
+      }
+
+      if (body.action === 'report_save') {
+        const rid = Number(body.reportId);
+        if (!Number.isInteger(rid) || rid <= 0) return res.status(400).json({ error: 'Unknown report.' });
+        const rep = (await sql`select report from po_reports where id = ${rid} and account = ${acct}`)[0];
+        if (!rep) return res.status(404).json({ error: 'This report no longer exists.', code: 'gone' });
+        const dels = [...new Set((Array.isArray(body.deletes) ? body.deletes : []).map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+        const okCats = new Set((await sql`select id from po_categories where report = ${rep.report}`).map((c) => Number(c.id)));
+        const ups = [];
+        for (const u of Array.isArray(body.updates) ? body.updates.slice(0, 500) : []) {
+          const id = Number(u?.id);
+          if (!Number.isInteger(id) || id <= 0 || dels.includes(id)) continue;
+          const supplier = String(u.supplier ?? '').trim().slice(0, 200);
+          const amount = Number(String(u.amount ?? '').replace(/,/g, ''));
+          const pc = Number(u.poCategoryId);
+          const day = (v) => { const t = String(v ?? '').slice(0, 10); return ISO.test(t) ? t : ''; };
+          if (!supplier) return res.status(400).json({ error: 'Supplier name cannot be empty.' });
+          if (!(amount > 0 && amount <= 1e10)) return res.status(400).json({ error: 'PO amount must be a number above 0.' });
+          if (!okCats.has(pc)) return res.status(400).json({ error: 'Category does not belong to this report.' });
+          ups.push({ id, supplier: supplier.toUpperCase(), amount: Math.round(amount * 100) / 100, pc, brand: String(u.brand ?? '').trim().slice(0, 100).toUpperCase(), remark: String(u.remark ?? '').trim().slice(0, 300).toUpperCase(), dv: day(u.dateVerified), dr: day(u.dateReceived) });
+        }
+        // One statement = all or nothing: PO fields, the matching budget entries, and removals.
+        const out = await sql`
+          with tgt as (select p.id, p.entry_id from purchase_orders p where p.report_id = ${rid} and p.account = ${acct}),
+          u as (
+            select * from unnest(${ups.map((x) => x.id)}::bigint[], ${ups.map((x) => x.supplier)}::text[], ${ups.map((x) => x.pc)}::int[], ${ups.map((x) => x.brand)}::text[],
+                                 ${ups.map((x) => x.remark)}::text[], ${ups.map((x) => x.dv)}::text[], ${ups.map((x) => x.dr)}::text[], ${ups.map((x) => x.amount)}::numeric[])
+              as t(id, supplier, pc, brand, remark, dv, dr, amount)
+            where id in (select id from tgt)
+          ),
+          upd as (
+            update purchase_orders p set supplier = u.supplier, po_category_id = u.pc, brand = u.brand, remark = u.remark,
+                   date_verified = nullif(u.dv, '')::date, date_received = nullif(u.dr, '')::date, amount = u.amount
+            from u where p.id = u.id returning p.id, p.entry_id, u.amount, u.pc
+          ),
+          ent as (
+            update entries e set value = upd.amount, category_id = pc.category_id
+            from upd join po_categories pc on pc.id = upd.pc where e.id = upd.entry_id returning e.id
+          ),
+          del as (
+            delete from entries e where e.id in (select entry_id from tgt where id = any(${dels}::bigint[])) returning e.id
+          )
+          select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted, (select count(*) from ent)::int as e`;
+        // a report with no POs left is removed as well
+        const left = await sql`select 1 from purchase_orders where report_id = ${rid}`;
+        if (!left.length) await sql`delete from po_reports where id = ${rid} and account = ${acct}`;
+        return res.status(200).json({ ok: true, updated: out[0].updated, deleted: out[0].deleted, reportGone: !left.length });
+      }
       return res.status(400).json({ error: 'Unknown action.' });
     }
     if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -121,21 +186,23 @@ export default async function handler(req, res) {
       const from = ISO_DAY(req.query.from, d.toISOString().slice(0, 10));
       const to = ISO_DAY(req.query.to, today);
       const reps = await sql`
-        select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle, r.po_count as count, r.total::float8 as total
-        from po_reports r
+        select r.id, r.report, r.report_date::text as "date", (extract(epoch from r.saved_at) * 1000)::float8 as ts, r.cycle_no as cycle,
+               count(p.id)::int as count, sum(p.amount)::float8 as total
+        from po_reports r join purchase_orders p on p.report_id = r.id
         where r.account = ${acct} and (r.saved_at at time zone 'Asia/Kuala_Lumpur')::date between ${from}::date and ${to}::date
-        order by r.id desc limit 200`;
+        group by r.id order by r.id desc limit 200`;
       const ids = reps.map((r) => Number(r.id));
       const rows = ids.length ? await sql`
         select p.id, p.po_no as "poNo", p.supplier, p.date_received::text as "dateReceived", p.date_verified::text as "dateVerified",
-               p.amount::float8 as amount, c.name as category, c.report, c.sort_order as "sort", p.brand, p.remark, p.report_id as "reportId"
+               p.amount::float8 as amount, c.name as category, c.report, c.sort_order as "sort", p.brand, p.remark, p.report_id as "reportId", p.po_category_id as "pcId"
         from purchase_orders p join po_categories c on c.id = p.po_category_id
         where p.account = ${acct} and p.report_id = any(${ids}::bigint[])
         order by c.sort_order, p.id` : [];
       return res.status(200).json({
         today, from, to, outlet: OUTLET_NAME[acct] || acct, reports: await attnMap(),
+        categories: (await sql`select id, name, report from po_categories order by sort_order, id`).map((c) => ({ id: Number(c.id), name: c.name, report: c.report })),
         saved: reps.map((r) => ({ ...r, id: Number(r.id) })),
-        rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: Number(r.reportId) })),
+        rows: rows.map((r) => ({ ...r, id: Number(r.id), reportId: Number(r.reportId), pcId: Number(r.pcId) })),
       });
     }
 

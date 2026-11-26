@@ -345,6 +345,10 @@ select.field { appearance: auto; }
 .potable td:nth-child(5) { min-width: 84px; }
 .potable td.num, .potable th.num { text-align: right; white-space: nowrap; }
 .potable tr:last-child td { border-bottom: 0; }
+.potable.edt input, .potable.edt select { width: 100%; min-width: 70px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 6px 7px; font: inherit; font-size: 12.5px; }
+.potable.edt td:nth-child(2) input { min-width: 170px; } .potable.edt td:nth-child(3) select { min-width: 150px; } .potable.edt td:nth-child(7) input { min-width: 96px; text-align: right; }
+.potable.edt tr.rm td { opacity: .45; } .potable.edt tr.rm input, .potable.edt tr.rm select { text-decoration: line-through; pointer-events: none; }
+.sbtn.danger, .potable button.mini.danger { color: #f87171; border-color: rgba(248,113,113,.45); }
 .potable .sub2 { color: var(--muted); font-size: 12px; }
 .poscroll { overflow-x: auto; }
 .rpt-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; margin-bottom: 16px; }
@@ -358,7 +362,7 @@ select.field { appearance: auto; }
 .paper h2 { margin: 0 0 14px; font-size: 17px; letter-spacing: .02em; }
 .paper .phead { display: flex; gap: 0 110px; margin: 4px 0 0; font-weight: 700; line-height: 1.7; }
 .paper table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-.paper table { table-layout: fixed; }
+.paper table { table-layout: fixed; width: calc(100% - 2px); }   /* 2px keeps the right-hand border inside the printable area */
 .paper th:nth-child(1) { width: 4.5%; } .paper th:nth-child(2) { width: 11%; } .paper th:nth-child(3) { width: 17.5%; } .paper th:nth-child(4) { width: 14%; } .paper th:nth-child(5) { width: 12.5%; }
 .paper th:nth-child(6), .paper th:nth-child(7) { width: 9.5%; } .paper th:nth-child(8) { width: 10.5%; } .paper th:nth-child(9) { width: 11%; }
 .paper td { overflow-wrap: anywhere; }
@@ -1056,13 +1060,13 @@ select.field { appearance: auto; }
   const poEl = $('poMain'), rptEl = $('rptMain');
   const P = { rows: null, hasToken: false, q: '', loading: false, err: '' };
   const R = { data: null, report: 'FOOD', sel: new Set(), msg: null, err: '' };
-  const S = { data: null, report: 'ALL', from: '', to: '', open: null, err: '' };
+  const S = { data: null, report: 'ALL', from: '', to: '', open: null, edit: null, err: '' };
   const subEl = $('subMain');
   const f2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dmyDot = (s) => (s ? s.slice(0, 10).split('-').reverse().join('.') : '');
   const dmySlash = (s) => (s ? s.slice(0, 10).split('-').reverse().join('/') : '');
 
-  function poReset() { P.rows = null; P.hasToken = false; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; }
+  function poReset() { P.rows = null; P.hasToken = false; P.q = ''; P.err = ''; R.data = null; R.report = 'FOOD'; R.sel = new Set(); R.msg = null; R.err = ''; S.data = null; S.report = 'ALL'; S.from = S.to = ''; S.open = null; S.edit = null; S.err = ''; poEl.innerHTML = ''; rptEl.innerHTML = ''; subEl.innerHTML = ''; }
   async function poApi(url, opts) {
     const r = await fetch(url, { cache: 'no-store', ...opts });
     const j = await r.json().catch(() => ({}));
@@ -1218,21 +1222,76 @@ select.field { appearance: auto; }
         <div><label>Report</label><div class="tabs2" role="group" aria-label="Report">${['ALL', ...d.reports.map((x) => x.code)].map((c) => `<button type="button" data-rep="${esc(c)}" aria-pressed="${c === S.report}">${c === 'ALL' ? 'All' : esc(repLabel(c))}</button>`).join('')}</div></div>
         <div><label for="sFrom">Saved from</label><input class="field" type="date" id="sFrom" value="${esc(S.from)}"></div>
         <div><label for="sTo">to</label><input class="field" type="date" id="sTo" value="${esc(S.to)}"></div>
-        ${open ? '<button type="button" class="sbtn primary" id="sPrint">Print this report</button>' : ''}
+        ${open && !S.edit ? '<button type="button" class="sbtn primary" id="sPrint">Print this report</button>' : ''}
       </div>
       <section class="card nopr" aria-label="Saved reports">
         <div class="alist-head"><strong>${list.length} saved report${list.length === 1 ? '' : 's'}</strong><span class="hint">Total RM ${f2.format(list.reduce((t, r) => t + r.total, 0))}</span></div>
         <div class="poscroll"><table class="potable">
           <thead><tr><th>Saved</th><th>Report</th><th>Cycle</th><th class="num">POs</th><th class="num">Total (RM)</th><th></th></tr></thead>
-          <tbody>${list.length ? list.map((r) => `<tr class="${r.id === S.open ? 'sel' : ''}"><td>${dt(r.ts)}</td><td><b>${esc(repLabel(r.report))}</b></td><td>${cycleName(r.cycle)}</td><td class="num">${r.count}</td><td class="num"><b>${f2.format(r.total)}</b></td><td class="num"><button type="button" class="mini" data-open="${r.id}">${r.id === S.open ? 'Hide' : 'View / Print'}</button></td></tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);padding:22px">No saved reports in this period.</td></tr>'}</tbody>
+          <tbody>${list.length ? list.map((r) => `<tr class="${r.id === S.open ? 'sel' : ''}"><td>${dt(r.ts)}</td><td><b>${esc(repLabel(r.report))}</b></td><td>${cycleName(r.cycle)}</td><td class="num">${r.count}</td><td class="num"><b>${f2.format(r.total)}</b></td><td class="num" style="white-space:nowrap"><button type="button" class="mini" data-open="${r.id}">${r.id === S.open ? 'Hide' : 'View / Print'}</button> <button type="button" class="mini" data-edit="${r.id}">Edit</button> <button type="button" class="mini danger" data-delrep="${r.id}">Delete</button></td></tr>`).join('') : '<tr><td colspan="6" style="color:var(--muted);padding:22px">No saved reports in this period.</td></tr>'}</tbody>
         </table></div>
       </section>
-      ${open ? `<div style="margin-top:16px">${paperHtml(rep, open.date, d.outlet, d.rows.filter((r) => r.reportId === open.id))}</div>` : ''}`;
+      ${S.edit ? editorHtml(d) : open ? `<div style="margin-top:16px">${paperHtml(rep, open.date, d.outlet, d.rows.filter((r) => r.reportId === open.id))}</div>` : ''}`;
     subEl.querySelectorAll('[data-rep]').forEach((b) => (b.onclick = () => { S.report = b.dataset.rep; renderSub(); }));
     subEl.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { const id = Number(b.dataset.open); S.open = S.open === id ? null : id; renderSub(); }));
     const onDate = () => { const a = $('sFrom').value, b = $('sTo').value; if (!a) return; S.from = a; S.to = b && b >= a ? b : a; S.open = null; subLoad(); };
     $('sFrom').onchange = onDate; $('sTo').onchange = onDate;
     const pr = $('sPrint'); if (pr) pr.onclick = () => window.print();
+    subEl.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => {
+      const id = Number(b.dataset.edit), rp = d.saved.find((x) => x.id === id); if (!rp) return;
+      S.open = id;
+      S.edit = { id, rows: d.rows.filter((x) => x.reportId === id).map((x) => ({ id: x.id, poNo: x.poNo, supplier: x.supplier, pcId: x.pcId, brand: x.brand, remark: x.remark, dateVerified: x.dateVerified || '', dateReceived: x.dateReceived || '', amount: f2.format(x.amount), remove: false })) };
+      renderSub(); const t = $('editBox'); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+    subEl.querySelectorAll('[data-delrep]').forEach((b) => (b.onclick = () => deleteReport(Number(b.dataset.delrep))));
+    const eb = $('editBox');
+    if (eb) {
+      const E = S.edit;
+      eb.querySelectorAll('[data-f]').forEach((el) => {
+        const row = () => E.rows[Number(el.closest('tr').dataset.i)];
+        el.oninput = el.onchange = () => {
+          let v = el.value;
+          if (el.dataset.f === 'amount') { v = v.replace(/[^0-9.,]/g, ''); if (v !== el.value) el.value = v; }
+          row()[el.dataset.f] = el.dataset.f === 'pcId' ? Number(v) : v;
+        };
+      });
+      eb.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { E.rows[Number(b.closest('tr').dataset.i)].remove ^= 1; E.rows[Number(b.closest('tr').dataset.i)].remove = !!E.rows[Number(b.closest('tr').dataset.i)].remove; renderSub(); }));
+      $('eCancel').onclick = () => { S.edit = null; renderSub(); };
+      $('eDel').onclick = () => deleteReport(E.id);
+      $('eSave').onclick = async () => {
+        const keep = E.rows.filter((x) => !x.remove), gone = E.rows.filter((x) => x.remove);
+        for (const x of keep) {
+          if (!x.supplier.trim()) return toast('Supplier name cannot be empty.', true);
+          if (!(Number(String(x.amount).replace(/,/g, '')) > 0)) return toast('PO amount must be a number above 0 (' + x.poNo + ').', true);
+        }
+        if (gone.length && !confirm(`Remove ${gone.length} PO${gone.length === 1 ? '' : 's'} from this report? Their values are taken off the category budget and the PO numbers can be pushed again.`)) return;
+        $('eSave').disabled = true;
+        try {
+          const j = await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'report_save', reportId: E.id, updates: keep.map((x) => ({ id: x.id, supplier: x.supplier, poCategoryId: x.pcId, brand: x.brand, remark: x.remark, dateVerified: x.dateVerified, dateReceived: x.dateReceived, amount: x.amount })), deletes: gone.map((x) => x.id) }) });
+          S.edit = null; if (j.reportGone) S.open = null; P.rows = null;
+          toast(j.reportGone ? 'All POs removed, so the report was deleted.' : 'Report saved. Budgets updated.'); await subLoad();
+        } catch (err) { if (!err.auth) toast(err.message, true); const b = $('eSave'); if (b) b.disabled = false; }
+      };
+    }
+  }
+  function editorHtml(d) {
+    const E = S.edit, rp = d.saved.find((x) => x.id === E.id); if (!rp) return '';
+    const cats = d.categories.filter((c) => c.report === rp.report);
+    return `<section class="card pocard nopr" id="editBox" style="margin-top:16px" aria-label="Edit saved report">
+      <h2>Edit ${esc(repLabel(rp.report))} report · saved ${esc(dmySlash(rp.date))}</h2>
+      <p>Changes also update the category budget. The PO No cannot be changed. Use Remove for a PO that should not be in this report (its value is taken off the budget).</p>
+      <div class="poscroll"><table class="potable edt"><thead><tr><th>PO No</th><th>Supplier</th><th>Category</th><th>Brand</th><th>Date verified</th><th>Date received</th><th class="num">PO amount (RM)</th><th>Remark</th><th></th></tr></thead>
+      <tbody>${E.rows.map((x, i) => `<tr data-i="${i}" class="${x.remove ? 'rm' : ''}"><td><b>${esc(x.poNo)}</b></td><td><input data-f="supplier" value="${esc(x.supplier)}" maxlength="200"></td><td><select data-f="pcId">${cats.map((c) => `<option value="${c.id}" ${c.id === x.pcId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></td><td><input data-f="brand" value="${esc(x.brand)}" maxlength="100"></td><td><input type="date" data-f="dateVerified" value="${esc(x.dateVerified)}"></td><td><input type="date" data-f="dateReceived" value="${esc(x.dateReceived)}"></td><td><input data-f="amount" inputmode="decimal" value="${esc(x.amount)}"></td><td><input data-f="remark" value="${esc(x.remark)}" maxlength="300"></td><td><button type="button" class="mini ${x.remove ? '' : 'danger'}" data-rm>${x.remove ? 'Undo' : 'Remove'}</button></td></tr>`).join('')}</tbody></table></div>
+      <div class="pobtns"><button type="button" class="sbtn primary" id="eSave">Save changes</button><button type="button" class="sbtn danger" id="eDel">Delete report</button><button type="button" class="sbtn" id="eCancel">Cancel</button></div>
+    </section>`;
+  }
+  async function deleteReport(id) {
+    const rp = S.data.saved.find((x) => x.id === id); if (!rp) return;
+    if (!confirm(`Delete this ${repLabel(rp.report)} report saved ${dmySlash(rp.date)}?\n\nIts ${rp.count} PO${rp.count === 1 ? '' : 's'} (RM ${f2.format(rp.total)}) are taken off the category budgets, and the PO numbers can be pushed again. This cannot be undone.`)) return;
+    try {
+      await poApi('/api/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'report_delete', reportId: id }) });
+      if (S.open === id) S.open = null; S.edit = null; P.rows = null; toast('Report deleted. Budgets updated.'); await subLoad();
+    } catch (err) { if (!err.auth) { toast(err.message, true); subLoad(); } }
   }
 
   // "1/2, 2/2" at the bottom right, only when the printed report runs to more than one A4 portrait page

@@ -154,6 +154,8 @@ export default async function handler(req, res) {
           )
           select (select count(*) from upd)::int as updated, (select count(*) from del)::int as deleted,
                  (select count(*) from log_edit)::int + (select count(*) from log_del)::int as logged`;
+        // a saved PO summary report whose POs were all deleted disappears too (reports also hide themselves when empty)
+        if (out[0].deleted) await sql`delete from po_reports r where not exists (select 1 from purchase_orders p where p.report_id = r.id)`;
         return res.status(200).json({
           ok: true,
           updated: out[0].updated,

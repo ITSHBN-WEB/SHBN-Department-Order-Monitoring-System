@@ -538,6 +538,61 @@ assert.ok(r.body.activity.every((a) => a.ts > 0));
   assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01970000'`)[0].n, 0);
   assert.equal((await push({ k: token, po: { po_no: 'HQ01970000', supplier: 'HERH FUAH (S) SDN.BHD.', amount: 940 }, poCategoryId: pet.id })).code, 201);   // can be pushed again
 
+  // the saved NONFOOD report lost its only PO to Central Admin, so it disappears from Submitted Summary Report; FROZEN/RTD shows the edited amount
+  r = await call(po, { query: { view: 'submitted' } });
+  assert.deepEqual(r.body.saved.map((x) => [x.report, x.count, x.total]), [['FROZEN/RTD', 1, 2000]]);
+  assert.equal((await sql`select count(*)::int n from po_reports where report = 'NONFOOD'`)[0].n, 0);
+
+  // edit a saved report: save two FOOD POs, then change one (supplier, category, amount...) and remove the other
+  const food2 = (await call(po, { query: { view: 'pending' } })).body.rows.filter((x) => x.report === 'FOOD');
+  const dFood = Object.fromEntries(food2.map((x) => [x.poNo, x.id]));
+  assert.equal((await push({ k: token, po: { po_no: 'HQ01980001', supplier: 'A SDN BHD', amount: 300 }, poCategoryId: rice.id })).code, 201);
+  const food3 = (await call(po, { query: { view: 'pending' } })).body.rows.filter((x) => x.report === 'FOOD').map((x) => x.id);
+  const riceRecv = async () => (await call(dashboard)).body.categories.find((c) => c.name === 'RICE').received;
+  const rice0 = await riceRecv(), bev1 = await bevRecv();
+  r = await submit({ report: 'FOOD', ids: food3 });
+  assert.equal(r.code, 200);
+  const rid = r.body.reportId;
+  const poRows = (await call(po, { query: { view: 'submitted' } })).body.rows.filter((x) => x.reportId === rid);
+  assert.equal(poRows.length, 2);
+  const pBev = poRows.find((x) => x.poNo === 'HQ01964261'), pRice = poRows.find((x) => x.poNo === 'HQ01980001');
+  assert.equal(await riceRecv(), rice0 + 300);
+  const save = (b, as = '1008-SHBN') => call(po, { method: 'POST', as, body: { action: 'report_save', reportId: rid, ...b } });
+  const upd = (x, o) => ({ id: x.id, supplier: x.supplier, poCategoryId: x.pcId, brand: x.brand, remark: x.remark, dateVerified: x.dateVerified, dateReceived: x.dateReceived, amount: x.amount, ...o });
+  assert.equal((await save({ updates: [upd(pBev, { poCategoryId: pet.id })] })).code, 400);          // NONFOOD category on a FOOD report
+  assert.equal((await save({ updates: [upd(pBev, { amount: 0 })] })).code, 400);
+  assert.equal((await save({ updates: [upd(pBev, { supplier: ' ' })] })).code, 400);
+  assert.equal((await save({ updates: [upd(pBev, {})] }, '1015-SHPL')).code, 403);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'report_save', reportId: 99999, updates: [] } })).code, 404);
+  r = await save({ updates: [upd(pBev, { poCategoryId: rice.id, amount: '1,500.50', brand: 'new brand', supplier: 'Edited Supplier', dateVerified: '2026-11-01', remark: 'fixed' }), upd(pRice, {})], deletes: [] });
+  assert.deepEqual([r.code, r.body.updated, r.body.deleted], [200, 2, 0]);
+  const ed = (await sql`select p.supplier, p.brand, p.remark, p.amount::float8 a, p.date_verified::text dv, e.value::float8 ev, c.name cn from purchase_orders p join entries e on e.id = p.entry_id join categories c on c.id = e.category_id where p.po_no = 'HQ01964261'`)[0];
+  assert.deepEqual([ed.supplier, ed.brand, ed.remark, ed.a, ed.dv, ed.ev, ed.cn], ['EDITED SUPPLIER', 'NEW BRAND', 'FIXED', 1500.5, '2026-11-01', 1500.5, 'RICE']);   // the budget entry moved category and value with it
+  assert.equal(await riceRecv(), rice0 + 300 + 1500.5);
+  assert.equal(await bevRecv(), bev1);                                              // BEVERAGES back to what it was: the PO moved to RICE
+  r = (await call(po, { query: { view: 'submitted' } })).body;
+  assert.deepEqual(r.saved.find((x) => x.id === rid) && [r.saved.find((x) => x.id === rid).count, r.saved.find((x) => x.id === rid).total], [2, 1800.5]);
+  // remove one PO from the report: its budget value goes too; the other PO stays
+  r = await save({ updates: [], deletes: [pRice.id] });
+  assert.deepEqual([r.code, r.body.deleted, r.body.reportGone], [200, 1, false]);
+  assert.equal(await riceRecv(), rice0 + 1500.5);
+  assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01980001'`)[0].n, 0);
+  // delete the whole report: report, POs and budget values all disappear; the PO numbers can be pushed again
+  assert.equal((await call(po, { method: 'POST', as: '1015-SHPL', body: { action: 'report_delete', reportId: rid } })).code, 403);
+  r = await call(po, { method: 'POST', body: { action: 'report_delete', reportId: rid } });
+  assert.deepEqual([r.code, r.body.removed], [200, 1]);
+  assert.equal(await riceRecv(), rice0);
+  assert.equal((await sql`select count(*)::int n from po_reports where id = ${rid}`)[0].n, 0);
+  assert.equal((await sql`select count(*)::int n from purchase_orders where po_no = 'HQ01964261'`)[0].n, 0);
+  assert.equal((await call(po, { method: 'POST', body: { action: 'report_delete', reportId: rid } })).code, 404);
+  assert.equal((await push({ k: token, po: PO2, poCategoryId: bev.id })).code, 201);
+  // removing every PO from a saved report removes the report itself
+  const idn = (await call(po, { query: { view: 'pending' } })).body.rows.find((x) => x.poNo === 'HQ01964261').id;
+  r = await submit({ report: 'FOOD', ids: [idn] });
+  const only = (await call(po, { query: { view: 'submitted' } })).body.rows.find((x) => x.reportId === r.body.reportId);
+  r = await call(po, { method: 'POST', body: { action: 'report_save', reportId: r.body.reportId, updates: [], deletes: [only.id] } });
+  assert.deepEqual([r.code, r.body.reportGone], [200, true]);
+
   // creating a new bookmark invalidates the old one
   r = await call(po, { method: 'POST', body: { action: 'token' } });
   assert.equal((await check('HQ09999999', token)).code, 401);
